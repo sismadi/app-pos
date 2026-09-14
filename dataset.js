@@ -15,6 +15,7 @@
 const siteConfig = [
     { slug: 'home',        label: 'Beranda',  menu: true },
     { slug: 'dashboard',   label: 'Dashboard', menu: true, role: ['owner', 'kasir', 'gudang'] },
+    { slug: 'kasir',       label: 'Kasir',     menu: true, role: ['owner', 'kasir'] },
     { slug: 'transaksi',   label: 'Transaksi', menu: true, role: ['owner', 'kasir'] },
     { slug: 'produk',      label: 'Produk',    menu: true, role: ['owner', 'gudang'] },
     { slug: 'lokasi',      label: 'Lokasi',    menu: true, role: ['owner', 'gudang'] },
@@ -37,6 +38,7 @@ const pageFiles = [
     'pages/lokasi.js',
     'pages/distribusi.js',
     'pages/transaksi.js',
+    'pages/kasir.js',
     'pages/tenant.js',
     'pages/dashboard.js',
 ];

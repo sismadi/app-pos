@@ -32,7 +32,7 @@ const web = {
         if (!overlay || !panel || !bodyEl || !cfg) return;
 
         titleEl.textContent = cfg.title || cfg.subtitle || 'Form';
-        bodyEl.innerHTML = components.genericForm(cfg);
+        bodyEl.innerHTML = cfg.bodyHtml !== undefined ? cfg.bodyHtml : components.genericForm(cfg);
 
         overlay.classList.add('open');
         panel.classList.add('open');
@@ -66,10 +66,14 @@ const web = {
 
         let pageData = [];
         const resolverName = this.routes[targetSlug];
+        // Resolver bisa terdaftar sebagai web.resolveXxx (mis. auth.js) ATAU
+        // sebagai `function resolveXxx(){}` biasa di pages/*.js (otomatis
+        // jadi window.resolveXxx) — cek keduanya, jangan cuma `this`.
+        const resolverFn = this[resolverName] || window[resolverName];
 
         try {
-            if (typeof this[resolverName] === 'function') {
-                pageData = await Promise.resolve(this[resolverName](subParam, targetSlug));
+            if (typeof resolverFn === 'function') {
+                pageData = await Promise.resolve(resolverFn.call(this, subParam, targetSlug));
             } else {
                 pageData = this.resolveContent(targetSlug, subParam);
             }

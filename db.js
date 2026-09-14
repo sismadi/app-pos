@@ -13,7 +13,7 @@
 // lewat "Kode Toko") disediakan db.allForTenant()/db.insertForTenant()
 // sebagai jalur eksplisit — dipakai HANYA oleh auth.js.
 // ============================================================
-const API_BASE = '/api';
+const API_BASE = 'pos-api.sismadi.workers.dev/api';
 
 const SCOPED_TABLES = new Set([
     'users', 'produk', 'lokasi', 'lokasi_produk', 'kontak',

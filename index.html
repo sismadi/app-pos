@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="id" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="utf-8">
+    <meta name="description" content="Aplikasi POS (Point of Sale) multi-tenant: kelola produk, lokasi/gudang, distribusi stok, transaksi jual-beli, kontak, dan pembayaran QRIS untuk banyak toko dalam satu aplikasi.">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+    <title>POS Multi-Tenant</title>
+    <link rel="stylesheet" type="text/css" href="style.css">
+    <link rel="stylesheet" type="text/css" href="svg.css">
+</head>
+<body>
+
+  <div class="main" id="body">
+    <div id="stickyHeaderWrap">
+    <div class="row header">
+        <div class="kiri">
+            <span class="orange">POS Multi-Tenant</span>
+            <span class="orange sub"></span>
+        </div>
+        <div class="kanan">
+            <div id="authSlot" class="auth-slot"></div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="menu-bar" id="stickyMenu">
+            <div class="burger" id="burgerBtn">&#9776;</div>
+            <nav class="nav-links" id="navLinks">
+              <a href="/?home" onclick="return web.navigate('home')">Beranda</a>
+            </nav>
+        </div>
+    </div>
+    </div>
+
+<div id="content"></div>
+
+<!-- FORM DRAWER — panel geser dari kanan, dipakai ulang oleh SEMUA form
+     tambah/edit (produk, kontak, lokasi, distribusi, transaksi, tenant). -->
+<div id="formDrawerOverlay" class="form-drawer-overlay" onclick="web.closeDrawer()"></div>
+<div id="formDrawerPanel" class="form-drawer" role="dialog" aria-modal="true" aria-labelledby="formDrawerTitle">
+    <div class="form-drawer-header">
+        <span class="form-drawer-header-title" id="formDrawerTitle"></span>
+        <button type="button" class="form-drawer-close" onclick="web.closeDrawer()">&times; Tutup</button>
+    </div>
+    <div class="form-drawer-body" id="formDrawerBody"></div>
+</div>
+
+<div class="row footer">
+    <div class="kiri">POS Multi-Tenant &mdash; Contoh Aplikasi Kasir Multi-Toko</div>
+    <div class="kanan">&nbsp; &copy; 2026</div>
+</div>
+
+</div>
+
+<script type="text/javascript" src="svg.js"></script>
+<script type="text/javascript" src="engine.js"></script>
+<script type="text/javascript" src="db.js"></script>
+<script type="text/javascript" src="auth.js"></script>
+
+<script type="text/javascript">
+if (typeof svg !== 'undefined') svg.di();
+</script>
+
+<script type="text/javascript">
+// Menu dibangun dari siteConfig (dataset.js). Menyaring berdasar status
+// login (guestOnly) & peran (role) — lihat komentar di dataset.js.
+function renderMenu() {
+    const navLinks = document.getElementById('navLinks');
+    if (!navLinks) return;
+
+    const user = (typeof auth !== 'undefined') ? auth.currentUser() : null;
+
+    navLinks.innerHTML = siteConfig
+        .filter(p => p.menu)
+        .filter(p => !p.guestOnly || !user)
+        .filter(p => !p.role || (user && p.role.includes(user.role)))
+        .map(p => `<a href="/?${p.slug}" onclick="return web.navigate('${p.slug}')">${p.label}</a>`)
+        .join('\n');
+
+    if (typeof auth !== 'undefined') auth.renderAuthUI();
+}
+</script>
+
+<script src="dataset.js"></script>
+<script>
+    loadPageScripts(pageFiles, () => {
+        renderMenu();
+    });
+</script>
+
+</body>
+</html>

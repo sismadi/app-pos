@@ -5,13 +5,13 @@
 // (status draft -> selesai), supaya dokumen bisa diedit dulu sebelum stok
 // benar-benar bergerak. Header dibuat dulu (Lokasi + Kontak, lewat
 // lokasiKontakFields() bersama), lalu baris produknya ditambah lewat
-// katalog+keranjang BERSAMA (lihat pages/_shared.js) — komponen yang
+// katalog+keranjang BERSAMA (lihat pages/shared.js) — komponen yang
 // sama dipakai kasir & transaksi, jadi bisa tambah banyak produk
 // sekaligus alih-alih satu-satu lewat dropdown.
 // ============================================================
 web.routes.distribusi = 'resolveDistribusi';
 
-// --- Katalog+keranjang untuk menambah baris produk (reuse dari _shared.js) ---
+// --- Katalog+keranjang untuk menambah baris produk (reuse dari shared.js) ---
 const distribusiCatalogPage = createCatalogCart('distribusiCatalogPage', {
     cartTitle: 'Tambah Baris Produk',
     allowPriceEdit: true,

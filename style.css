@@ -1434,7 +1434,7 @@ body.drawer-lock { overflow: hidden; }
 /* =====================================================
    Catalog + Cart — komponen BERSAMA katalog produk +
    keranjang, dipakai kasir.js, distribusi.js, & transaksi.js
-   (lihat pages/_shared.js -> createCatalogCart). Kelas di sini
+   (lihat pages/shared.js -> createCatalogCart). Kelas di sini
    sengaja generik ("catcart-*", bukan "kasir-*") supaya jelas
    ini komponen lintas-halaman, bukan cuma milik Kasir.
    ===================================================== */

@@ -3,7 +3,7 @@
 // seperti pola header distribusi/transaksi), lalu katalog produk (grid,
 // bisa dicari & difilter kategori, menampilkan stok real di lokasi
 // terpilih) + keranjang belanja. Katalog+keranjangnya sendiri sekarang
-// komponen BERSAMA (lihat pages/_shared.js -> createCatalogCart), dipakai
+// komponen BERSAMA (lihat pages/shared.js -> createCatalogCart), dipakai
 // ulang juga oleh distribusi.js & transaksi.js supaya perlakuannya
 // konsisten di ketiga halaman.
 //

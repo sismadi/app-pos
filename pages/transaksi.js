@@ -2,7 +2,7 @@
 // pages/transaksi.js — Transaksi jual (ke customer) & beli (dari
 // supplier), pola header+baris sama seperti distribusi.js — header dibuat
 // dulu (Lokasi + Kontak lewat lokasiKontakFields() bersama), baris
-// produknya ditambah lewat katalog+keranjang BERSAMA (pages/_shared.js),
+// produknya ditambah lewat katalog+keranjang BERSAMA (pages/shared.js),
 // komponen yang sama dipakai kasir & distribusi supaya konsisten dan
 // bisa tambah banyak produk sekaligus. Perbedaan dgn distribusi:
 // (1) finalisasi jual MENGURANGI stok lokasi, beli MENAMBAH — kebalikan
@@ -12,7 +12,7 @@
 // ============================================================
 web.routes.transaksi = 'resolveTransaksi';
 
-// --- Katalog+keranjang untuk menambah baris produk (reuse dari _shared.js) ---
+// --- Katalog+keranjang untuk menambah baris produk (reuse dari shared.js) ---
 const transaksiCatalogPage = createCatalogCart('transaksiCatalogPage', {
     cartTitle: 'Tambah Baris Produk',
     allowPriceEdit: true,

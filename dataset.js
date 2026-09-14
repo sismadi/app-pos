@@ -32,7 +32,7 @@ const pages = {};
 
 // Daftar file JS halaman yang dimuat berurutan sebelum menu dirender.
 const pageFiles = [
-    'pages/_shared.js',
+    'pages/shared.js',
     'pages/home.js',
     'pages/produk.js',
     'pages/kontak.js',

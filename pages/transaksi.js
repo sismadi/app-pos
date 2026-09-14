@@ -1,12 +1,38 @@
 // ============================================================
 // pages/transaksi.js — Transaksi jual (ke customer) & beli (dari
-// supplier), pola header+baris sama seperti distribusi.js. Perbedaan:
+// supplier), pola header+baris sama seperti distribusi.js — header dibuat
+// dulu (Lokasi + Kontak lewat lokasiKontakFields() bersama), baris
+// produknya ditambah lewat katalog+keranjang BERSAMA (pages/_shared.js),
+// komponen yang sama dipakai kasir & distribusi supaya konsisten dan
+// bisa tambah banyak produk sekaligus. Perbedaan dgn distribusi:
 // (1) finalisasi jual MENGURANGI stok lokasi, beli MENAMBAH — kebalikan
 //     dari distribusi masuk/keluar tapi logikanya identik;
 // (2) transaksi jual bisa dibayar QRIS -> membuat 1 baris di tabel
 //     `payment` (lihat qrisPage.buatPembayaran).
 // ============================================================
 web.routes.transaksi = 'resolveTransaksi';
+
+// --- Katalog+keranjang untuk menambah baris produk (reuse dari _shared.js) ---
+const transaksiCatalogPage = createCatalogCart('transaksiCatalogPage', {
+    cartTitle: 'Tambah Baris Produk',
+    allowPriceEdit: true,
+    getPrice: (p) => transaksiCatalogPage._tipe === 'jual' ? (p.hargaJual || 0) : (p.hargaBeli || 0),
+    getStock: (p) => transaksiCatalogPage._stokMap?.[p.id] ?? null,
+    emptyCatalogMsg: 'Belum ada produk aktif.',
+    emptyCartMsg: 'Belum ada produk dipilih. Ketuk produk di atas untuk menambah baris.',
+    confirmLabel: (ctrl) => `Tambahkan ${ctrl.jumlahItem()} Baris Produk`,
+    onConfirm: async (cart, form, ctrl) => {
+        const transaksiId = ctrl._transaksiId;
+        for (const c of cart) {
+            await db.insert('transaksi_produk', {
+                transaksiId, produkId: c.produkId, qty: c.qty, hargaSatuan: c.harga, subtotal: c.qty * c.harga,
+            });
+        }
+        await transaksiPage._syncTotal(transaksiId);
+        web.closeDrawer();
+        web.navigate(`transaksi/detail-${transaksiId}`);
+    },
+});
 
 const transaksiPage = {
     async bukaTambah(tipe) {
@@ -22,10 +48,9 @@ const transaksiPage = {
                 { type: 'hidden', name: 'tipe', value: tipe },
                 { type: 'text',   name: 'nomor', label: 'Nomor', placeholder: 'Opsional, otomatis jika kosong' },
                 { type: 'text',   name: 'tanggal', label: 'Tanggal', value: new Date().toISOString().slice(0, 10) },
-                { type: 'select', name: 'lokasiId', label: 'Lokasi', required: true,
-                  options: lokasiList.map(l => ({ value: l.id, label: l.nama })) },
-                { type: 'select', name: 'kontakId', label: tipe === 'jual' ? 'Customer (opsional)' : 'Supplier',
-                  options: kontakList.map(k => ({ value: k.id, label: k.nama })) },
+                ...lokasiKontakFields(lokasiList, kontakList, {
+                    kontakLabel: tipe === 'jual' ? 'Customer (opsional)' : 'Supplier',
+                }),
                 { type: 'select', name: 'metodePembayaran', label: 'Metode Pembayaran', value: 'tunai',
                   options: [{ value: 'tunai', label: 'Tunai' }, { value: 'qris', label: 'QRIS' }] },
                 { type: 'textarea', name: 'catatan', label: 'Catatan' },
@@ -54,48 +79,22 @@ const transaksiPage = {
         web.navigate('transaksi');
     },
 
-    async bukaTambahBaris(transaksiId) {
-        const produkList = await db.query('produk', p => p.aktif);
+    /** Tambah baris produk lewat katalog+keranjang bersama (bisa banyak
+     *  produk sekaligus) — sama seperti kasir, konsisten & reuse. */
+    async bukaTambahBaris(transaksiId, tipe) {
+        const [produkList, trx] = await Promise.all([
+            db.query('produk', p => p.aktif),
+            db.find('transaksi', t => t.id === transaksiId),
+        ]);
         if (!produkList.length) return alert('Belum ada produk aktif.');
-        web.openDrawer({
-            title: 'Tambah Baris Produk',
-            fields: [
-                { type: 'hidden', name: 'transaksiId', value: transaksiId },
-                { type: 'select', name: 'produkId', label: 'Produk', required: true,
-                  options: produkList.map(p => ({ value: p.id, label: `${p.nama} (Rp${(p.hargaJual || 0).toLocaleString('id-ID')})` })) },
-                { type: 'number', name: 'qty', label: 'Jumlah', value: 1, required: true },
-                { type: 'number', name: 'hargaSatuan', label: 'Harga Satuan', value: 0, required: true },
-            ],
-            submitText: 'Tambahkan Baris',
-            onSubmit: 'event.preventDefault(); transaksiPage.simpanBaris(this);',
-        });
-    },
-
-    /** Isi otomatis harga satuan sesuai harga jual/beli produk yang dipilih, dipanggil dari drawer lewat tombol. */
-    async isiHargaOtomatis(select, tipe) {
-        const p = await db.find('produk', x => x.id === select.value);
-        if (!p) return;
-        const harga = tipe === 'jual' ? p.hargaJual : p.hargaBeli;
-        const input = select.closest('form').querySelector('[name="hargaSatuan"]');
-        if (input) input.value = harga || 0;
-    },
-
-    async simpanBaris(form) {
-        const val = (n) => form.querySelector(`[name="${n}"]`)?.value;
-        const transaksiId = val('transaksiId');
-        const produkId = val('produkId');
-        if (!produkId) return alert('Pilih produk.');
-        const qty = parseFloat(val('qty')) || 0;
-        const hargaSatuan = parseFloat(val('hargaSatuan')) || 0;
-        if (qty <= 0) return alert('Jumlah harus lebih dari 0.');
-
-        try {
-            await db.insert('transaksi_produk', { transaksiId, produkId, qty, hargaSatuan, subtotal: qty * hargaSatuan });
-            await this._syncTotal(transaksiId);
-        } catch (err) { return alert('Gagal menambah baris: ' + err.message); }
-
-        web.closeDrawer();
-        web.navigate(`transaksi/detail-${transaksiId}`);
+        const stokRows = trx ? await db.query('lokasi_produk', s => s.lokasiId === trx.lokasiId) : [];
+        transaksiCatalogPage._transaksiId = transaksiId;
+        transaksiCatalogPage._tipe = tipe;
+        transaksiCatalogPage._stokMap = Object.fromEntries(stokRows.map(s => [s.produkId, s.stok]));
+        transaksiCatalogPage.kataKunci = '';
+        transaksiCatalogPage.kategoriAktif = '';
+        transaksiCatalogPage.setProdukList(produkList);
+        transaksiCatalogPage.openPicker(`Tambah Baris — Transaksi ${tipe === 'jual' ? 'Jual' : 'Beli'}`);
     },
 
     async hapusBaris(id, transaksiId) {
@@ -247,7 +246,7 @@ async function resolveTransaksiDetail(id) {
     }));
 
     const aksiHeader = trx.status === 'draft'
-        ? `<button class="slcBtn" onclick="transaksiPage.bukaTambahBaris('${id}')">+ Tambah Baris Produk</button>
+        ? `<button class="slcBtn" onclick="transaksiPage.bukaTambahBaris('${id}','${trx.tipe}')">+ Tambah Baris Produk</button>
            <button class="slcBtn" style="background:#1e824c" onclick="transaksiPage.finalisasi('${id}')">Finalisasi</button>
            <button class="slcBtn" style="background:#c0392b" onclick="transaksiPage.batalkan('${id}')">Batalkan</button>`
         : `<button class="slcBtn" style="background:#555" onclick="web.navigate('transaksi')">&larr; Kembali</button>`;

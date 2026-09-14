@@ -1,224 +1,154 @@
 // ============================================================
-// pages/kasir.js — Layar Kasir: katalog produk (grid, bisa dicari
-// & difilter kategori) + keranjang belanja yang dibuka di drawer
-// geser-kanan yang sama dipakai form tambah/edit (lihat
-// web.openDrawer di engine.js, sekarang mendukung cfg.bodyHtml
-// untuk konten non-form seperti keranjang ini).
+// pages/kasir.js — Layar Kasir: pilih Lokasi + Customer di ATAS (sama
+// seperti pola header distribusi/transaksi), lalu katalog produk (grid,
+// bisa dicari & difilter kategori, menampilkan stok real di lokasi
+// terpilih) + keranjang belanja. Katalog+keranjangnya sendiri sekarang
+// komponen BERSAMA (lihat pages/_shared.js -> createCatalogCart), dipakai
+// ulang juga oleh distribusi.js & transaksi.js supaya perlakuannya
+// konsisten di ketiga halaman.
 //
-// Beda dengan alur "Transaksi" (draft -> tambah baris satu-satu
-// -> finalisasi manual): di sini SATU tombol "Bayar" langsung
-// membuat transaksi jual, baris produknya, menyesuaikan stok, dan
-// (kalau QRIS) membuat baris pembayaran — meniru alur kasir toko
-// sungguhan. Setelah bayar, diarahkan ke halaman detail transaksi
-// yang sudah ada (struk + kode QRIS demo).
+// Beda dengan alur "Transaksi" (draft -> tambah baris satu-satu ->
+// finalisasi manual): di sini SATU tombol "Bayar" langsung membuat
+// transaksi jual, baris produknya, menyesuaikan stok, dan (kalau QRIS)
+// membuat baris pembayaran — meniru alur kasir toko sungguhan. Setelah
+// bayar, diarahkan ke halaman detail transaksi yang sudah ada (struk +
+// kode QRIS demo).
 // ============================================================
 web.routes.kasir = 'resolveKasir';
 
-const kasirPage = {
-    cart: [],           // [{ produkId, nama, harga, qty }]
-    produkList: [],
+const kasirPage = Object.assign(createCatalogCart('kasirPage', {
+    cartTitle: 'Keranjang',
+    allowPriceEdit: false,
+    getPrice: (p) => p.hargaJual || 0,
+    getStock: (p) => kasirPage.stokMap[p.id] ?? 0,
+    emptyCatalogMsg: 'Tidak ada produk yang cocok.',
+    emptyCartMsg: 'Keranjang masih kosong. Ketuk produk di katalog untuk menambah.',
+    extraFieldsHtml: () => `
+        <div class="a-row"><label class="a-label">Bayar dengan</label>
+            <select name="metodePembayaran">
+                <option value="tunai">Tunai</option>
+                <option value="qris">QRIS</option>
+            </select></div>`,
+    confirmLabel: (ctrl) => `Bayar ${formatRupiah(ctrl.total())}`,
+    onCartChange: (ctrl) => ctrl.updateFab(),
+    onConfirm: async (cart, form) => kasirPage.checkout(cart, form),
+}), {
+    // --- State khusus kasir: lokasi & customer aktif, dipilih di atas ---
     lokasiList: [],
     kontakList: [],
-    kategoriAktif: '',
-    kataKunci: '',
+    lokasiId: '',
+    kontakId: '',
+    stokMap: {},
 
     async load() {
-        const [produk, lokasi, kontak] = await Promise.all([
-            db.query('produk', p => p.aktif),
+        const [lokasi, kontak] = await Promise.all([
             db.query('lokasi', () => true),
             db.query('kontak', k => k.tipe === 'customer'),
         ]);
-        this.produkList = produk;
         this.lokasiList = lokasi;
         this.kontakList = kontak;
+        if (!this.lokasiId || !lokasi.some(l => l.id === this.lokasiId)) {
+            this.lokasiId = lokasi[0]?.id || '';
+        }
+        await this.muatKatalogLokasi();
     },
 
-    kategoriList() {
-        return [...new Set(this.produkList.map(p => p.kategori).filter(Boolean))];
+    /** Muat ulang katalog + peta stok untuk lokasi aktif — dipanggil saat
+     *  masuk halaman dan tiap kali kasir GANTI lokasi. */
+    async muatKatalogLokasi() {
+        const [produk, stok] = await Promise.all([
+            db.query('produk', p => p.aktif),
+            this.lokasiId ? db.query('lokasi_produk', s => s.lokasiId === this.lokasiId) : Promise.resolve([]),
+        ]);
+        this.stokMap = Object.fromEntries(stok.map(s => [s.produkId, s.stok]));
+        this.setProdukList(produk); // reset keranjang juga: stok/harga per lokasi bisa beda
     },
 
-    produkTersaring() {
-        const kw = this.kataKunci.trim().toLowerCase();
-        return this.produkList.filter(p =>
-            (!this.kategoriAktif || p.kategori === this.kategoriAktif) &&
-            (!kw || p.nama.toLowerCase().includes(kw) || (p.kode || '').toLowerCase().includes(kw)));
-    },
-
-    cariProduk(kw) { this.kataKunci = kw; this.renderGrid(); },
-    pilihKategori(k) { this.kategoriAktif = k; this.renderGrid(); },
-
-    renderGrid() {
-        const chips = web.gebi('kasirKategoriChips');
-        const grid  = web.gebi('kasirGrid');
-        if (chips) chips.innerHTML = this.chipsHtml();
-        if (grid) grid.innerHTML = this.gridHtml();
-    },
-
-    chipsHtml() {
-        const semua = `<button type="button" class="kasir-chip ${!this.kategoriAktif ? 'active' : ''}" onclick="kasirPage.pilihKategori('')">Semua</button>`;
-        return semua + this.kategoriList().map(k =>
-            `<button type="button" class="kasir-chip ${this.kategoriAktif === k ? 'active' : ''}" onclick="kasirPage.pilihKategori('${k}')">${k}</button>`
-        ).join('');
-    },
-
-    gridHtml() {
-        const list = this.produkTersaring();
-        if (!list.length) return `<div class="info-card">Tidak ada produk yang cocok.</div>`;
-        return `<div class="kasir-catalog-grid">${list.map(p => {
-            const line = this.cart.find(c => c.produkId === p.id);
-            return `
-            <button type="button" class="kasir-product-card" onclick="kasirPage.tambah('${p.id}')">
-                ${line ? `<span class="kasir-qty-badge">${line.qty}</span>` : ''}
-                <span class="kasir-product-nama">${p.nama}</span>
-                <span class="kasir-product-kategori">${p.kategori || '&nbsp;'}</span>
-                <span class="kasir-product-harga">${formatRupiah(p.hargaJual)}</span>
-            </button>`;
-        }).join('')}</div>`;
-    },
-
-    tambah(produkId) {
-        const p = this.produkList.find(x => x.id === produkId);
-        if (!p) return;
-        const line = this.cart.find(c => c.produkId === produkId);
-        if (line) line.qty += 1;
-        else this.cart.push({ produkId, nama: p.nama, harga: p.hargaJual, qty: 1 });
+    async gantiLokasi(lokasiId) {
+        this.lokasiId = lokasiId;
+        await this.muatKatalogLokasi();
         this.renderGrid();
         this.updateFab();
     },
 
-    ubahQty(produkId, delta) {
-        const line = this.cart.find(c => c.produkId === produkId);
-        if (!line) return;
-        line.qty += delta;
-        if (line.qty <= 0) this.cart = this.cart.filter(c => c.produkId !== produkId);
-        this.renderGrid();
-        this.updateFab();
-        this.openCart(); // drawer sedang terbuka saat tombol qty dipakai -> refresh isinya
-    },
+    gantiKontak(kontakId) { this.kontakId = kontakId; },
 
-    hapusDariKeranjang(produkId) {
-        this.cart = this.cart.filter(c => c.produkId !== produkId);
-        this.renderGrid();
-        this.updateFab();
-        this.openCart();
+    headerBarHtml() {
+        const lokasiOpt = this.lokasiList.map(l =>
+            `<option value="${l.id}" ${l.id === this.lokasiId ? 'selected' : ''}>${l.nama}</option>`).join('');
+        const kontakOpt = this.kontakList.map(k =>
+            `<option value="${k.id}" ${k.id === this.kontakId ? 'selected' : ''}>${k.nama}</option>`).join('');
+        return `
+            <div class="catcart-header-bar">
+                <label>Lokasi
+                    <select onchange="kasirPage.gantiLokasi(this.value)">${lokasiOpt}</select>
+                </label>
+                <label>Customer
+                    <select onchange="kasirPage.gantiKontak(this.value)">
+                        <option value="">&mdash; umum / tanpa nama &mdash;</option>${kontakOpt}
+                    </select>
+                </label>
+            </div>`;
     },
-
-    total() { return this.cart.reduce((s, c) => s + c.qty * c.harga, 0); },
-    jumlahItem() { return this.cart.reduce((s, c) => s + c.qty, 0); },
 
     updateFab() {
         const fab = web.gebi('kasirFab');
         if (!fab) return;
-        fab.querySelector('.kasir-fab-count').textContent = this.jumlahItem();
-        fab.querySelector('.kasir-fab-total').textContent = formatRupiah(this.total());
+        fab.querySelector('.catcart-fab-count').textContent = this.jumlahItem();
+        fab.querySelector('.catcart-fab-total').textContent = formatRupiah(this.total());
         fab.classList.toggle('hide', this.jumlahItem() === 0);
     },
 
-    openCart() {
-        if (!this.lokasiList.length) return alert('Buat lokasi terlebih dahulu di menu Lokasi.');
-        web.openDrawer({ title: `Keranjang (${this.jumlahItem()})`, bodyHtml: this.cartHtml() });
-    },
-
-    cartHtml() {
-        if (!this.cart.length) {
-            return `<div class="info-card">Keranjang masih kosong. Ketuk produk di katalog untuk menambah.</div>`;
-        }
-        const rows = this.cart.map(c => `
-            <div class="kasir-cart-row">
-                <div class="kasir-cart-row-info">
-                    <strong>${c.nama}</strong>
-                    <span>${formatRupiah(c.harga)} &times; ${c.qty} = ${formatRupiah(c.harga * c.qty)}</span>
-                </div>
-                <div class="kasir-cart-row-qty">
-                    <button type="button" onclick="kasirPage.ubahQty('${c.produkId}', -1)">&minus;</button>
-                    <span>${c.qty}</span>
-                    <button type="button" onclick="kasirPage.ubahQty('${c.produkId}', 1)">+</button>
-                    <button type="button" class="kasir-cart-row-hapus" onclick="kasirPage.hapusDariKeranjang('${c.produkId}')">&times;</button>
-                </div>
-            </div>`).join('');
-
-        const lokasiOpt = this.lokasiList.map(l => `<option value="${l.id}">${l.nama}</option>`).join('');
-        const kontakOpt = this.kontakList.map(k => `<option value="${k.id}">${k.nama}</option>`).join('');
-
-        return `
-            <div class="kasir-cart-list">${rows}</div>
-            <div class="kasir-cart-total-row"><span>Total</span><strong>${formatRupiah(this.total())}</strong></div>
-            <hr>
-            <form class="dynamic-form" onsubmit="event.preventDefault(); kasirPage.checkout(this);">
-                <div class="a-row"><label class="a-label">Lokasi</label>
-                    <select name="lokasiId" required>${lokasiOpt}</select></div>
-                <div class="a-row"><label class="a-label">Customer</label>
-                    <select name="kontakId"><option value="">&mdash; umum / tanpa nama &mdash;</option>${kontakOpt}</select></div>
-                <div class="a-row"><label class="a-label">Bayar dengan</label>
-                    <select name="metodePembayaran">
-                        <option value="tunai">Tunai</option>
-                        <option value="qris">QRIS</option>
-                    </select></div>
-                <button type="submit" class="slcBtn kasir-bayar-btn">Bayar ${formatRupiah(this.total())}</button>
-            </form>`;
-    },
-
-    /** Checkout langsung: header + baris + penyesuaian stok + (opsional) pembayaran QRIS,
-     *  tanpa lewat status draft — meniru transaksi kasir sungguhan yang selesai seketika. */
-    async checkout(form) {
-        if (!this.cart.length) return alert('Keranjang masih kosong.');
+    /** Checkout langsung: header + baris + penyesuaian stok + (opsional) pembayaran
+     *  QRIS, tanpa lewat status draft — meniru transaksi kasir sungguhan yang
+     *  selesai seketika. Lokasi & customer sudah dipilih di atas, jadi form
+     *  keranjang cuma perlu menanyakan metode pembayaran. */
+    async checkout(cart, form) {
+        if (!this.lokasiId) return alert('Pilih lokasi terlebih dahulu.');
         const val = (n) => form.querySelector(`[name="${n}"]`)?.value;
-        const lokasiId = val('lokasiId');
-        if (!lokasiId) return alert('Pilih lokasi.');
-        const kontakId = val('kontakId') || null;
         const metodePembayaran = val('metodePembayaran') || 'tunai';
-        const total = this.total();
+        const total = cart.reduce((s, c) => s + c.qty * c.harga, 0);
 
-        const btn = form.querySelector('button[type="submit"]');
-        if (btn) { btn.disabled = true; btn.textContent = 'Memproses...'; }
+        const header = await db.insert('transaksi', {
+            tipe: 'jual',
+            nomor: 'TR-' + Date.now().toString(36).toUpperCase(),
+            tanggal: new Date().toISOString().slice(0, 10),
+            lokasiId: this.lokasiId, kontakId: this.kontakId || null, status: 'draft',
+            metodePembayaran, totalBayar: total, catatan: '',
+            createdAt: new Date().toISOString(),
+        });
 
-        try {
-            const header = await db.insert('transaksi', {
-                tipe: 'jual',
-                nomor: 'TR-' + Date.now().toString(36).toUpperCase(),
-                tanggal: new Date().toISOString().slice(0, 10),
-                lokasiId, kontakId, status: 'draft',
-                metodePembayaran, totalBayar: total, catatan: '',
-                createdAt: new Date().toISOString(),
+        for (const c of cart) {
+            await db.insert('transaksi_produk', {
+                transaksiId: header.id, produkId: c.produkId,
+                qty: c.qty, hargaSatuan: c.harga, subtotal: c.qty * c.harga,
             });
-
-            for (const c of this.cart) {
-                await db.insert('transaksi_produk', {
-                    transaksiId: header.id, produkId: c.produkId,
-                    qty: c.qty, hargaSatuan: c.harga, subtotal: c.qty * c.harga,
-                });
-            }
-
-            for (const c of this.cart) {
-                const existing = await db.find('lokasi_produk', s => s.lokasiId === lokasiId && s.produkId === c.produkId);
-                const stokLama = existing?.stok || 0;
-                const stokBaru = stokLama - c.qty;
-                if (existing) await db.update('lokasi_produk', existing.id, { stok: stokBaru });
-                else await db.insert('lokasi_produk', { lokasiId, produkId: c.produkId, stok: stokBaru, stokMinimum: 0 });
-            }
-
-            await db.update('transaksi', header.id, { status: 'selesai' });
-            if (metodePembayaran === 'qris' && typeof qrisPage !== 'undefined') {
-                await qrisPage.buatPembayaran(header.id, total);
-            }
-
-            this.cart = [];
-            this.updateFab();
-            web.closeDrawer();
-            web.navigate(`transaksi/detail-${header.id}`);
-        } catch (err) {
-            if (btn) { btn.disabled = false; btn.textContent = `Bayar ${formatRupiah(total)}`; }
-            alert('Gagal memproses pembayaran: ' + err.message);
         }
+
+        for (const c of cart) {
+            const existing = await db.find('lokasi_produk', s => s.lokasiId === this.lokasiId && s.produkId === c.produkId);
+            const stokLama = existing?.stok || 0;
+            const stokBaru = stokLama - c.qty;
+            if (existing) await db.update('lokasi_produk', existing.id, { stok: stokBaru });
+            else await db.insert('lokasi_produk', { lokasiId: this.lokasiId, produkId: c.produkId, stok: stokBaru, stokMinimum: 0 });
+        }
+
+        await db.update('transaksi', header.id, { status: 'selesai' });
+        if (metodePembayaran === 'qris' && typeof qrisPage !== 'undefined') {
+            await qrisPage.buatPembayaran(header.id, total);
+        }
+
+        this.updateFab();
+        web.closeDrawer();
+        web.navigate(`transaksi/detail-${header.id}`);
     },
-};
+});
 
 async function resolveKasir() {
     const guard = requireLogin(['owner', 'kasir']);
     if (guard) return guard;
 
     await kasirPage.load();
-    kasirPage.cart = [];
     kasirPage.kataKunci = '';
     kasirPage.kategoriAktif = '';
 
@@ -236,18 +166,19 @@ async function resolveKasir() {
     }
 
     const catalogHtml = `
-        <div class="kasir-toolbar">
-            <input type="search" placeholder="Cari produk..." oninput="kasirPage.cariProduk(this.value)" class="kasir-search">
-            <div class="kasir-chips" id="kasirKategoriChips">${kasirPage.chipsHtml()}</div>
+        <div id="kasirPageHeaderBar">${kasirPage.headerBarHtml()}</div>
+        <div class="catcart-toolbar">
+            <input type="search" placeholder="Cari produk..." oninput="kasirPage.cariProduk(this.value)" class="catcart-search">
+            <div class="catcart-chips" id="kasirPageChips">${kasirPage.chipsHtml()}</div>
         </div>
-        <div id="kasirGrid">${kasirPage.gridHtml()}</div>
-        <div class="kasir-fab hide" id="kasirFab" onclick="kasirPage.openCart()">
-            <span>&#128722; <span class="kasir-fab-count">0</span> item</span>
-            <span class="kasir-fab-total">Rp0</span>
+        <div id="kasirPageGrid">${kasirPage.gridHtml()}</div>
+        <div class="catcart-fab hide" id="kasirFab" onclick="kasirPage.openCart()">
+            <span>&#128722; <span class="catcart-fab-count">0</span> item</span>
+            <span class="catcart-fab-total">Rp0</span>
         </div>`;
 
     return [
-        { section: 'titleHero', title: 'Kasir', description: 'Ketuk produk untuk menambah ke keranjang, lalu ketuk tombol keranjang di kanan-bawah untuk bayar.' },
+        { section: 'titleHero', title: 'Kasir', description: 'Pilih lokasi & customer di atas, ketuk produk untuk menambah ke keranjang, lalu ketuk tombol keranjang di kanan-bawah untuk bayar.' },
         { section: 'articleFull', lines: [catalogHtml] },
     ];
 }

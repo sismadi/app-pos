@@ -3,14 +3,36 @@
 // produk (distribusi_produk). Berbeda dari produk.js/kontak.js: ini
 // dokumen "header + baris", dan baru MENGUBAH STOK saat difinalisasi
 // (status draft -> selesai), supaya dokumen bisa diedit dulu sebelum stok
-// benar-benar bergerak.
+// benar-benar bergerak. Header dibuat dulu (Lokasi + Kontak, lewat
+// lokasiKontakFields() bersama), lalu baris produknya ditambah lewat
+// katalog+keranjang BERSAMA (lihat pages/_shared.js) — komponen yang
+// sama dipakai kasir & transaksi, jadi bisa tambah banyak produk
+// sekaligus alih-alih satu-satu lewat dropdown.
 // ============================================================
 web.routes.distribusi = 'resolveDistribusi';
 
-const distribusiPage = {
-    // --- Baris produk sementara (diedit di form, disimpan saat submit) ---
-    _lines: [],
+// --- Katalog+keranjang untuk menambah baris produk (reuse dari _shared.js) ---
+const distribusiCatalogPage = createCatalogCart('distribusiCatalogPage', {
+    cartTitle: 'Tambah Baris Produk',
+    allowPriceEdit: true,
+    getPrice: (p) => distribusiCatalogPage._tipe === 'masuk' ? (p.hargaBeli || 0) : (p.hargaJual || 0),
+    getStock: (p) => distribusiCatalogPage._stokMap?.[p.id] ?? null,
+    emptyCatalogMsg: 'Belum ada produk aktif.',
+    emptyCartMsg: 'Belum ada produk dipilih. Ketuk produk di atas untuk menambah baris.',
+    confirmLabel: (ctrl) => `Tambahkan ${ctrl.jumlahItem()} Baris Produk`,
+    onConfirm: async (cart, form, ctrl) => {
+        const distribusiId = ctrl._distribusiId;
+        for (const c of cart) {
+            await db.insert('distribusi_produk', {
+                distribusiId, produkId: c.produkId, qty: c.qty, hargaSatuan: c.harga,
+            });
+        }
+        web.closeDrawer();
+        web.navigate(`distribusi/detail-${distribusiId}`);
+    },
+});
 
+const distribusiPage = {
     async bukaTambah(tipe) {
         this._lines = [];
         const [lokasiList, kontakList] = await Promise.all([
@@ -25,10 +47,10 @@ const distribusiPage = {
                 { type: 'hidden', name: 'tipe', value: tipe },
                 { type: 'text',   name: 'nomor', label: 'Nomor Dokumen', placeholder: 'Opsional, otomatis jika kosong' },
                 { type: 'text',   name: 'tanggal', label: 'Tanggal', value: new Date().toISOString().slice(0, 10) },
-                { type: 'select', name: 'lokasiId', label: tipe === 'masuk' ? 'Lokasi Tujuan' : 'Lokasi Asal', required: true,
-                  options: lokasiList.map(l => ({ value: l.id, label: l.nama })) },
-                { type: 'select', name: 'kontakId', label: tipe === 'masuk' ? 'Supplier/Distributor' : 'Kontak (opsional)',
-                  options: kontakList.map(k => ({ value: k.id, label: k.nama })) },
+                ...lokasiKontakFields(lokasiList, kontakList, {
+                    lokasiLabel: tipe === 'masuk' ? 'Lokasi Tujuan' : 'Lokasi Asal',
+                    kontakLabel: tipe === 'masuk' ? 'Supplier/Distributor' : 'Kontak (opsional)',
+                }),
                 { type: 'textarea', name: 'catatan', label: 'Catatan' },
             ],
             submitText: 'Simpan sebagai Draft',
@@ -54,39 +76,22 @@ const distribusiPage = {
         web.navigate('distribusi');
     },
 
-    async bukaTambahBaris(distribusiId) {
-        const produkList = await db.query('produk', p => p.aktif);
+    /** Tambah baris produk lewat katalog+keranjang bersama (bisa banyak
+     *  produk sekaligus) — sama seperti kasir, konsisten & reuse. */
+    async bukaTambahBaris(distribusiId, tipe) {
+        const [produkList, dok] = await Promise.all([
+            db.query('produk', p => p.aktif),
+            db.find('distribusi', d => d.id === distribusiId),
+        ]);
         if (!produkList.length) return alert('Belum ada produk aktif. Tambahkan produk terlebih dahulu.');
-        web.openDrawer({
-            title: 'Tambah Baris Produk',
-            fields: [
-                { type: 'hidden', name: 'distribusiId', value: distribusiId },
-                { type: 'select', name: 'produkId', label: 'Produk', required: true,
-                  options: produkList.map(p => ({ value: p.id, label: p.nama })) },
-                { type: 'number', name: 'qty', label: 'Jumlah', value: 1, required: true },
-                { type: 'number', name: 'hargaSatuan', label: 'Harga Satuan', value: 0 },
-            ],
-            submitText: 'Tambahkan Baris',
-            onSubmit: 'event.preventDefault(); distribusiPage.simpanBaris(this);',
-        });
-    },
-
-    async simpanBaris(form) {
-        const val = (n) => form.querySelector(`[name="${n}"]`)?.value;
-        const distribusiId = val('distribusiId');
-        const produkId = val('produkId');
-        if (!produkId) return alert('Pilih produk.');
-        const qty = parseFloat(val('qty')) || 0;
-        if (qty <= 0) return alert('Jumlah harus lebih dari 0.');
-
-        try {
-            await db.insert('distribusi_produk', {
-                distribusiId, produkId, qty, hargaSatuan: parseFloat(val('hargaSatuan')) || 0,
-            });
-        } catch (err) { return alert('Gagal menambah baris: ' + err.message); }
-
-        web.closeDrawer();
-        web.navigate(`distribusi/detail-${distribusiId}`);
+        const stokRows = dok ? await db.query('lokasi_produk', s => s.lokasiId === dok.lokasiId) : [];
+        distribusiCatalogPage._distribusiId = distribusiId;
+        distribusiCatalogPage._tipe = tipe;
+        distribusiCatalogPage._stokMap = Object.fromEntries(stokRows.map(s => [s.produkId, s.stok]));
+        distribusiCatalogPage.kataKunci = '';
+        distribusiCatalogPage.kategoriAktif = '';
+        distribusiCatalogPage.setProdukList(produkList);
+        distribusiCatalogPage.openPicker(`Tambah Baris — Distribusi ${tipe === 'masuk' ? 'Masuk' : 'Keluar'}`);
     },
 
     async hapusBaris(id, distribusiId) {
@@ -197,7 +202,7 @@ async function resolveDistribusiDetail(id) {
     }));
 
     const aksiHeader = dok.status === 'draft'
-        ? `<button class="slcBtn" onclick="distribusiPage.bukaTambahBaris('${id}')">+ Tambah Baris Produk</button>
+        ? `<button class="slcBtn" onclick="distribusiPage.bukaTambahBaris('${id}','${dok.tipe}')">+ Tambah Baris Produk</button>
            <button class="slcBtn" style="background:#1e824c" onclick="distribusiPage.finalisasi('${id}')">Finalisasi</button>
            <button class="slcBtn" style="background:#c0392b" onclick="distribusiPage.hapus('${id}')">Hapus Dokumen</button>`
         : '';

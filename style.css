@@ -1432,10 +1432,41 @@ body.drawer-lock { overflow: hidden; }
 }
 
 /* =====================================================
-   Kasir — katalog produk + keranjang (drawer)
+   Catalog + Cart — komponen BERSAMA katalog produk +
+   keranjang, dipakai kasir.js, distribusi.js, & transaksi.js
+   (lihat pages/_shared.js -> createCatalogCart). Kelas di sini
+   sengaja generik ("catcart-*", bukan "kasir-*") supaya jelas
+   ini komponen lintas-halaman, bukan cuma milik Kasir.
    ===================================================== */
 
-.kasir-toolbar {
+/* --- Bar pilih Lokasi & Kontak di atas (kasir) --- */
+.catcart-header-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-family: var(--font-body);
+  background: #f7f9fa;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+.catcart-header-bar label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-muted);
+  flex: 1 1 180px;
+}
+.catcart-header-bar select {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tColor);
+}
+
+.catcart-toolbar {
   font-family: var(--font-body);
   position: sticky;
   top: 0;
@@ -1445,17 +1476,17 @@ body.drawer-lock { overflow: hidden; }
   margin-bottom: 6px;
 }
 
-.kasir-search {
+.catcart-search {
   margin: 0 0 12px;
 }
 
-.kasir-chips {
+.catcart-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.kasir-chip {
+.catcart-chip {
   background: #eef2f4;
   color: var(--tColor);
   border: 1px solid transparent;
@@ -1466,12 +1497,12 @@ body.drawer-lock { overflow: hidden; }
   font-weight: 600;
   cursor: pointer;
 }
-.kasir-chip.active {
+.catcart-chip.active {
   background: var(--pColor);
   color: #fff;
 }
 
-.kasir-catalog-grid {
+.catcart-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 14px;
@@ -1479,7 +1510,7 @@ body.drawer-lock { overflow: hidden; }
   padding-bottom: 90px; /* ruang supaya FAB tidak menutupi produk terakhir */
 }
 
-.kasir-product-card {
+.catcart-product-card {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1496,28 +1527,28 @@ body.drawer-lock { overflow: hidden; }
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
   width: 100%;
 }
-.kasir-product-card:hover {
+.catcart-product-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(0,0,0,0.12);
 }
-.kasir-product-card:active { transform: translateY(0); }
+.catcart-product-card:active { transform: translateY(0); }
 
-.kasir-product-nama {
+.catcart-product-nama {
   font-weight: 700;
   color: var(--pDarkColor);
   font-size: 14px;
 }
-.kasir-product-kategori {
+.catcart-product-kategori {
   font-size: 12px;
   color: var(--color-muted);
 }
-.kasir-product-harga {
+.catcart-product-harga {
   font-weight: 600;
   color: var(--aColor);
   margin-top: 4px;
 }
 
-.kasir-qty-badge {
+.catcart-qty-badge {
   position: absolute;
   top: -8px;
   right: -8px;
@@ -1534,8 +1565,8 @@ body.drawer-lock { overflow: hidden; }
   box-shadow: 0 2px 6px rgba(0,0,0,0.25);
 }
 
-/* --- Tombol keranjang mengambang --- */
-.kasir-fab {
+/* --- Tombol keranjang mengambang (kasir) --- */
+.catcart-fab {
   position: fixed;
   right: 24px;
   bottom: 24px;
@@ -1552,17 +1583,18 @@ body.drawer-lock { overflow: hidden; }
   box-shadow: 0 8px 24px rgba(0,0,0,0.3);
   cursor: pointer;
 }
-.kasir-fab:hover { background: var(--pColor); }
+.catcart-fab:hover { background: var(--pColor); }
 
-/* --- Isi keranjang di dalam drawer --- */
-.kasir-cart-list {
+/* --- Isi keranjang (drawer khusus kasir, atau digabung dgn katalog utk
+       distribusi/transaksi lewat pickerBodyHtml) --- */
+.catcart-cart-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
   margin-bottom: 12px;
 }
 
-.kasir-cart-row {
+.catcart-cart-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1572,21 +1604,27 @@ body.drawer-lock { overflow: hidden; }
   padding: 10px 12px;
 }
 
-.kasir-cart-row-info {
+.catcart-cart-row-info {
   display: flex;
   flex-direction: column;
   font-size: 13px;
 }
-.kasir-cart-row-info strong { font-size: 14px; }
-.kasir-cart-row-info span { color: var(--color-muted); }
+.catcart-cart-row-info strong { font-size: 14px; }
+.catcart-cart-row-info span { color: var(--color-muted); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 
-.kasir-cart-row-qty {
+.catcart-harga-input {
+  width: 90px;
+  padding: 2px 6px;
+  font-size: 13px;
+}
+
+.catcart-cart-row-qty {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
 }
-.kasir-cart-row-qty button {
+.catcart-cart-row-qty button {
   width: 28px;
   height: 28px;
   padding: 0;
@@ -1594,32 +1632,32 @@ body.drawer-lock { overflow: hidden; }
   border-radius: 50%;
   font-size: 16px;
 }
-.kasir-cart-row-qty span {
+.catcart-cart-row-qty span {
   min-width: 18px;
   text-align: center;
   font-weight: 600;
 }
-.kasir-cart-row-hapus {
+.catcart-cart-row-hapus {
   background: var(--color-danger) !important;
   margin-left: 4px;
 }
 
-.kasir-cart-total-row {
+.catcart-cart-total-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-size: 18px;
   padding: 6px 2px;
 }
-.kasir-cart-total-row strong { color: var(--pDarkColor); }
+.catcart-cart-total-row strong { color: var(--pDarkColor); }
 
-.kasir-bayar-btn {
+.catcart-confirm-btn {
   background: var(--color-success) !important;
   font-size: 16px;
   padding: 14px 24px;
 }
 
 @media (max-width: 600px) {
-  .kasir-catalog-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
-  .kasir-fab { left: 16px; right: 16px; justify-content: space-between; }
+  .catcart-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  .catcart-fab { left: 16px; right: 16px; justify-content: space-between; }
 }

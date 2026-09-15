@@ -3,7 +3,7 @@
 // cukup diatur di SATU tempat ini (dipakai oleh renderMenu() di
 // index.html) — menambah halaman baru tidak perlu menyentuh index.html.
 //
-// Field per item:
+// Item menu BIASA (link langsung), field:
 //   slug      -> dicocokkan dengan web.navigate('slug') / web.routes
 //   label     -> teks yang tampil di menu
 //   menu      -> true supaya muncul di navbar (halaman tanpa menu:true
@@ -11,19 +11,44 @@
 //   guestOnly -> true = hanya tampil kalau BELUM login (mis. 'login')
 //   role      -> array peran yang boleh melihat menu ini; kosong = semua
 //                peran yang sudah login boleh lihat (owner/kasir/gudang)
+//
+// Item menu PARENT (dropdown berisi sub-menu), field:
+//   label     -> teks parent yang tampil di navbar
+//   menu      -> true supaya muncul di navbar
+//   children  -> array item menu biasa (format sama seperti di atas,
+//                tanpa field `menu`). Parent otomatis tersembunyi kalau
+//                semua child-nya tersaring habis (guestOnly/role).
 // ============================================================
 const siteConfig = [
     { slug: 'home',        label: 'Beranda',  menu: true },
     { slug: 'dashboard',   label: 'Dashboard', menu: true, role: ['owner', 'kasir', 'gudang'] },
-    { slug: 'kasir',       label: 'Kasir',     menu: true, role: ['owner', 'kasir'] },
-    { slug: 'transaksi',   label: 'Transaksi', menu: true, role: ['owner', 'kasir'] },
-    { slug: 'produk',      label: 'Produk',    menu: true, role: ['owner', 'gudang'] },
-    { slug: 'lokasi',      label: 'Lokasi',    menu: true, role: ['owner', 'gudang'] },
-    { slug: 'distribusi',  label: 'Distribusi', menu: true, role: ['owner', 'gudang'] },
-    { slug: 'kontak',      label: 'Kontak',    menu: true, role: ['owner', 'kasir', 'gudang'] },
-    { slug: 'akun',        label: 'Akun',      menu: true, role: ['owner'] },
-    { slug: 'jurnal',      label: 'Jurnal',    menu: true, role: ['owner'] },
-    { slug: 'laporan',     label: 'Laporan Keuangan', menu: true, role: ['owner'] },
+    {
+        label: 'Penjualan',
+        menu: true,
+        children: [
+            { slug: 'kasir',     label: 'Kasir',     role: ['owner', 'kasir'] },
+            { slug: 'transaksi', label: 'Transaksi', role: ['owner', 'kasir'] },
+        ],
+    },
+    {
+        label: 'Data Master',
+        menu: true,
+        children: [
+            { slug: 'produk',     label: 'Produk',     role: ['owner', 'gudang'] },
+            { slug: 'lokasi',     label: 'Lokasi',     role: ['owner', 'gudang'] },
+            { slug: 'distribusi', label: 'Distribusi', role: ['owner', 'gudang'] },
+            { slug: 'kontak',     label: 'Kontak',     role: ['owner', 'kasir', 'gudang'] },
+        ],
+    },
+    {
+        label: 'Keuangan',
+        menu: true,
+        children: [
+            { slug: 'akun',    label: 'Akun',    role: ['owner'] },
+            { slug: 'jurnal',  label: 'Jurnal',  role: ['owner'] },
+            { slug: 'laporan', label: 'Laporan Keuangan', role: ['owner'] },
+        ],
+    },
     { slug: 'tenant',      label: 'Kelola Tenant', menu: true, role: ['superadmin'] },
     { slug: 'login',       label: 'Masuk',     menu: true, guestOnly: true },
 ];

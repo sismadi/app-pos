@@ -92,7 +92,18 @@ const web = {
         if (typeof svg?.di === 'function') svg.di();
 
         web.gebi('navLinks')?.classList.remove('active');
+        document.querySelectorAll('.nav-parent.open').forEach(el => el.classList.remove('open'));
         return false;
+    },
+
+    /** Buka/tutup submenu dropdown (dipakai lewat klik, terutama di mobile;
+     *  di desktop dropdown juga terbuka lewat hover via CSS — lihat style.css). */
+    toggleSubmenu: function (labelEl) {
+        const parent = labelEl.closest('.nav-parent');
+        if (!parent) return;
+        const wasOpen = parent.classList.contains('open');
+        document.querySelectorAll('.nav-parent.open').forEach(el => el.classList.remove('open'));
+        if (!wasOpen) parent.classList.add('open');
     },
 
     /** Halaman statis biasa: langsung baca pages[slug] (lihat dataset.js). */
@@ -386,5 +397,9 @@ document.addEventListener('click', (e) => {
         e.stopPropagation();
     } else if (nav?.classList.contains('active') && !nav.contains(e.target)) {
         nav.classList.remove('active');
+    }
+
+    if (!e.target.closest('.nav-parent')) {
+        document.querySelectorAll('.nav-parent.open').forEach(el => el.classList.remove('open'));
     }
 });

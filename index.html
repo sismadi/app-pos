@@ -64,17 +64,32 @@ if (typeof svg !== 'undefined') svg.di();
 <script type="text/javascript">
 // Menu dibangun dari siteConfig (dataset.js). Menyaring berdasar status
 // login (guestOnly) & peran (role) — lihat komentar di dataset.js.
+// Mendukung 2 bentuk item: link biasa (slug) & parent dropdown (children).
 function renderMenu() {
     const navLinks = document.getElementById('navLinks');
     if (!navLinks) return;
 
     const user = (typeof auth !== 'undefined') ? auth.currentUser() : null;
+    const visible = p => (!p.guestOnly || !user) && (!p.role || (user && p.role.includes(user.role)));
 
     navLinks.innerHTML = siteConfig
         .filter(p => p.menu)
-        .filter(p => !p.guestOnly || !user)
-        .filter(p => !p.role || (user && p.role.includes(user.role)))
-        .map(p => `<a href="?${p.slug}" onclick="return web.navigate('${p.slug}')">${p.label}</a>`)
+        .map(p => {
+            if (Array.isArray(p.children)) {
+                const children = p.children.filter(visible);
+                if (!children.length) return '';
+                const items = children
+                    .map(c => `<a href="?${c.slug}" onclick="return web.navigate('${c.slug}')">${c.label}</a>`)
+                    .join('\n');
+                return `<div class="nav-parent">
+                    <span class="nav-parent-label" onclick="web.toggleSubmenu(this)">${p.label} <span class="nav-caret">&#9662;</span></span>
+                    <div class="nav-children">${items}</div>
+                </div>`;
+            }
+            if (!visible(p)) return '';
+            return `<a href="?${p.slug}" onclick="return web.navigate('${p.slug}')">${p.label}</a>`;
+        })
+        .filter(Boolean)
         .join('\n');
 
     if (typeof auth !== 'undefined') auth.renderAuthUI();

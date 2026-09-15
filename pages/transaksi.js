@@ -1,157 +1,55 @@
 // ============================================================
 // pages/transaksi.js — Transaksi jual (ke customer) & beli (dari
-// supplier), pola header+baris sama seperti distribusi.js — header dibuat
-// dulu (Lokasi + Kontak lewat lokasiKontakFields() bersama), baris
-// produknya ditambah lewat katalog+keranjang BERSAMA (pages/shared.js),
-// komponen yang sama dipakai kasir & distribusi supaya konsisten dan
-// bisa tambah banyak produk sekaligus. Perbedaan dgn distribusi:
-// (1) finalisasi jual MENGURANGI stok lokasi, beli MENAMBAH — kebalikan
-//     dari distribusi masuk/keluar tapi logikanya identik;
-// (2) transaksi jual bisa dibayar QRIS -> membuat 1 baris di tabel
-//     `payment` (lihat qrisPage.buatPembayaran).
+// supplier), lewat mesin BERSAMA createInstantDocumentPage (pages/
+// shared.js) — mesin yang SAMA PERSIS dipakai kasir.js & distribusi.js:
+// pilih Lokasi/Kontak di atas -> ketuk produk di katalog -> satu tombol
+// konfirmasi langsung membuat header + baris produk + penyesuaian stok
+// (jual mengurangi, beli menambah) sekali jalan, tanpa status draft
+// manual — meniru layar kasir sungguhan untuk KETIGA alur (kasir,
+// transaksi, distribusi), bukan cuma katalognya doang yang di-share.
+// Kalau metode QRIS, langsung dibuat 1 baris di tabel `payment`
+// (lihat qrisPage.buatPembayaran).
 // ============================================================
 web.routes.transaksi = 'resolveTransaksi';
 
-// --- Katalog+keranjang untuk menambah baris produk (reuse dari shared.js) ---
-const transaksiCatalogPage = createCatalogCart('transaksiCatalogPage', {
-    cartTitle: 'Tambah Baris Produk',
+const transaksiKasirPage = createInstantDocumentPage('transaksiKasirPage', {
+    headerTable: 'transaksi', lineTable: 'transaksi_produk', headerIdField: 'transaksiId',
+    nomorPrefix: () => 'TR-',
+    detailRoute: () => 'transaksi/detail-',
+    pageTitle: (tipe) => tipe === 'jual' ? 'Transaksi Jual' : 'Transaksi Beli',
+    pageDesc: (tipe) => tipe === 'jual'
+        ? 'Pilih lokasi & customer di atas, ketuk produk untuk menambah ke keranjang, lalu ketuk tombol keranjang di kanan-bawah untuk selesai.'
+        : 'Pilih lokasi & supplier di atas, ketuk produk untuk menambah ke keranjang, lalu ketuk tombol keranjang di kanan-bawah untuk selesai.',
+    lokasiLabel: () => 'Lokasi',
+    kontakLabel: (tipe) => tipe === 'jual' ? 'Customer' : 'Supplier',
+    kontakEmptyLabel: (tipe) => tipe === 'jual' ? 'umum / tanpa nama' : 'tanpa supplier',
+    kontakFilter: (k, tipe) => tipe === 'jual' ? k.tipe === 'customer' : (k.tipe === 'supplier' || k.tipe === 'distributor'),
+    getPrice: (p, tipe) => tipe === 'jual' ? (p.hargaJual || 0) : (p.hargaBeli || 0),
     allowPriceEdit: true,
-    getPrice: (p) => transaksiCatalogPage._tipe === 'jual' ? (p.hargaJual || 0) : (p.hargaBeli || 0),
-    getStock: (p) => transaksiCatalogPage._stokMap?.[p.id] ?? null,
+    cartTitle: 'Keranjang',
     emptyCatalogMsg: 'Belum ada produk aktif.',
-    emptyCartMsg: 'Belum ada produk dipilih. Ketuk produk di atas untuk menambah baris.',
-    confirmLabel: (ctrl) => `Tambahkan ${ctrl.jumlahItem()} Baris Produk`,
-    onConfirm: async (cart, form, ctrl) => {
-        const transaksiId = ctrl._transaksiId;
-        for (const c of cart) {
-            await db.insert('transaksi_produk', {
-                transaksiId, produkId: c.produkId, qty: c.qty, hargaSatuan: c.harga, subtotal: c.qty * c.harga,
-            });
-        }
-        await transaksiPage._syncTotal(transaksiId);
-        web.closeDrawer();
-        web.navigate(`transaksi/detail-${transaksiId}`);
+    emptyCartMsg: 'Keranjang masih kosong. Ketuk produk di katalog untuk menambah.',
+    extraFieldsHtml: () => `
+        <div class="a-row"><label class="a-label">Bayar dengan</label>
+            <select name="metodePembayaran">
+                <option value="tunai">Tunai</option>
+                <option value="qris">QRIS</option>
+            </select></div>`,
+    readExtra: (form) => ({ metodePembayaran: form.querySelector('[name="metodePembayaran"]')?.value || 'tunai' }),
+    headerExtra: (ctrl, extra) => ({ metodePembayaran: extra.metodePembayaran, totalBayar: ctrl.total() }),
+    lineExtra: (c) => ({ subtotal: c.qty * c.harga }),
+    confirmLabel: (ctrl) => `Selesaikan (${formatRupiah(ctrl.total())})`,
+    stockDelta: (tipe) => tipe === 'jual' ? -1 : 1,
+    afterConfirm: async (header) => {
+        if (header.metodePembayaran === 'qris') await qrisPage.buatPembayaran(header.id, header.totalBayar);
     },
 });
 
 const transaksiPage = {
-    async bukaTambah(tipe) {
-        const [lokasiList, kontakList] = await Promise.all([
-            db.query('lokasi', () => true),
-            db.query('kontak', k => tipe === 'jual' ? k.tipe === 'customer' : (k.tipe === 'supplier' || k.tipe === 'distributor')),
-        ]);
-        if (!lokasiList.length) return alert('Buat lokasi terlebih dahulu di menu Lokasi.');
-
-        web.openDrawer({
-            title: tipe === 'jual' ? 'Transaksi Jual Baru' : 'Transaksi Beli Baru',
-            fields: [
-                { type: 'hidden', name: 'tipe', value: tipe },
-                { type: 'text',   name: 'nomor', label: 'Nomor', placeholder: 'Opsional, otomatis jika kosong' },
-                { type: 'text',   name: 'tanggal', label: 'Tanggal', value: new Date().toISOString().slice(0, 10) },
-                ...lokasiKontakFields(lokasiList, kontakList, {
-                    kontakLabel: tipe === 'jual' ? 'Customer (opsional)' : 'Supplier',
-                }),
-                { type: 'select', name: 'metodePembayaran', label: 'Metode Pembayaran', value: 'tunai',
-                  options: [{ value: 'tunai', label: 'Tunai' }, { value: 'qris', label: 'QRIS' }] },
-                { type: 'textarea', name: 'catatan', label: 'Catatan' },
-            ],
-            submitText: 'Simpan sebagai Draft',
-            onSubmit: 'event.preventDefault(); transaksiPage.simpanHeader(this);',
-            lines: ['form:', '**Catatan:** tambahkan baris produk setelah dokumen dibuat, lalu Finalisasi.'],
-        });
-    },
-
-    async simpanHeader(form) {
-        const val = (n) => form.querySelector(`[name="${n}"]`)?.value;
-        const data = {
-            tipe: val('tipe'), nomor: val('nomor') || ('TR-' + Date.now().toString(36).toUpperCase()),
-            tanggal: val('tanggal') || new Date().toISOString().slice(0, 10),
-            lokasiId: val('lokasiId'), kontakId: val('kontakId') || null,
-            status: 'draft', metodePembayaran: val('metodePembayaran') || 'tunai',
-            totalBayar: 0, catatan: val('catatan') || '',
-        };
-        if (!data.lokasiId) return alert('Lokasi wajib dipilih.');
-
-        try { await db.insert('transaksi', { ...data, createdAt: new Date().toISOString() }); }
-        catch (err) { return alert('Gagal menyimpan: ' + err.message); }
-
-        web.closeDrawer();
+    async hapus(id) {
+        if (!confirm('Hapus transaksi ini? Stok TIDAK dikembalikan otomatis — sesuaikan manual lewat Distribusi bila perlu.')) return;
+        try { await db.remove('transaksi', id); } catch (err) { return alert('Gagal menghapus: ' + err.message); }
         web.navigate('transaksi');
-    },
-
-    /** Tambah baris produk lewat katalog+keranjang bersama (bisa banyak
-     *  produk sekaligus) — sama seperti kasir, konsisten & reuse. */
-    async bukaTambahBaris(transaksiId, tipe) {
-        const [produkList, trx] = await Promise.all([
-            db.query('produk', p => p.aktif),
-            db.find('transaksi', t => t.id === transaksiId),
-        ]);
-        if (!produkList.length) return alert('Belum ada produk aktif.');
-        const stokRows = trx ? await db.query('lokasi_produk', s => s.lokasiId === trx.lokasiId) : [];
-        transaksiCatalogPage._transaksiId = transaksiId;
-        transaksiCatalogPage._tipe = tipe;
-        transaksiCatalogPage._stokMap = Object.fromEntries(stokRows.map(s => [s.produkId, s.stok]));
-        transaksiCatalogPage.kataKunci = '';
-        transaksiCatalogPage.kategoriAktif = '';
-        transaksiCatalogPage.setProdukList(produkList);
-        transaksiCatalogPage.openPicker(`Tambah Baris — Transaksi ${tipe === 'jual' ? 'Jual' : 'Beli'}`);
-    },
-
-    async hapusBaris(id, transaksiId) {
-        if (!confirm('Hapus baris ini?')) return;
-        try {
-            await db.remove('transaksi_produk', id);
-            await this._syncTotal(transaksiId);
-        } catch (err) { return alert('Gagal menghapus: ' + err.message); }
-        web.navigate(`transaksi/detail-${transaksiId}`);
-    },
-
-    async _syncTotal(transaksiId) {
-        const baris = await db.query('transaksi_produk', b => b.transaksiId === transaksiId);
-        const total = baris.reduce((sum, b) => sum + (b.qty * b.hargaSatuan), 0);
-        await db.update('transaksi', transaksiId, { totalBayar: total });
-    },
-
-    /**
-     * Finalisasi: status draft -> selesai + stok lokasi disesuaikan
-     * (jual mengurangi, beli menambah) + kalau metode QRIS, buat 1 baris
-     * pembayaran (tabel `payment`) berstatus pending.
-     */
-    async finalisasi(transaksiId) {
-        if (!confirm('Finalisasi transaksi ini? Stok akan langsung disesuaikan.')) return;
-
-        const trx = await db.find('transaksi', t => t.id === transaksiId);
-        if (!trx) return alert('Transaksi tidak ditemukan.');
-        if (trx.status !== 'draft') return alert('Transaksi ini sudah difinalisasi/dibatalkan sebelumnya.');
-
-        const baris = await db.query('transaksi_produk', b => b.transaksiId === transaksiId);
-        if (!baris.length) return alert('Tambahkan minimal 1 baris produk sebelum difinalisasi.');
-
-        try {
-            for (const b of baris) {
-                const existing = await db.find('lokasi_produk', s => s.lokasiId === trx.lokasiId && s.produkId === b.produkId);
-                const stokLama = existing?.stok || 0;
-                const delta = trx.tipe === 'jual' ? -b.qty : b.qty;
-                const stokBaru = stokLama + delta;
-                if (existing) await db.update('lokasi_produk', existing.id, { stok: stokBaru });
-                else await db.insert('lokasi_produk', { lokasiId: trx.lokasiId, produkId: b.produkId, stok: stokBaru, stokMinimum: 0 });
-            }
-            await db.update('transaksi', transaksiId, { status: 'selesai' });
-
-            if (trx.metodePembayaran === 'qris') {
-                await qrisPage.buatPembayaran(transaksiId, trx.totalBayar);
-            }
-        } catch (err) { return alert('Gagal memfinalisasi: ' + err.message); }
-
-        alert('Transaksi berhasil difinalisasi.');
-        web.navigate(`transaksi/detail-${transaksiId}`);
-    },
-
-    async batalkan(transaksiId) {
-        if (!confirm('Batalkan dokumen draft ini?')) return;
-        try { await db.update('transaksi', transaksiId, { status: 'batal' }); }
-        catch (err) { return alert('Gagal membatalkan: ' + err.message); }
-        web.navigate(`transaksi/detail-${transaksiId}`);
     },
 };
 
@@ -184,6 +82,27 @@ async function resolveTransaksi(sub) {
 
     if (sub && sub.startsWith('detail-')) return resolveTransaksiDetail(sub.replace('detail-', ''));
 
+    if (sub === 'jual' || sub === 'beli') {
+        await transaksiKasirPage.load(sub);
+        transaksiKasirPage.kataKunci = '';
+        transaksiKasirPage.kategoriAktif = '';
+
+        const judul = sub === 'jual' ? 'Transaksi Jual' : 'Transaksi Beli';
+        if (!transaksiKasirPage.lokasiList.length) {
+            return [
+                { section: 'titleHero', title: judul, description: 'Transaksi jual/beli lewat layar kasir.' },
+                { section: 'articleFull', subtitle: 'Belum Bisa Transaksi', lines: ['Buat minimal 1 lokasi di menu Lokasi sebelum membuat transaksi.'] },
+            ];
+        }
+        if (!transaksiKasirPage.produkList.length) {
+            return [
+                { section: 'titleHero', title: judul, description: 'Transaksi jual/beli lewat layar kasir.' },
+                { section: 'articleFull', subtitle: 'Belum Ada Produk', lines: ['Tambahkan produk aktif di menu Produk sebelum membuat transaksi.'] },
+            ];
+        }
+        return transaksiKasirPage.pageBlocks(sub);
+    }
+
     const [rows, lokasiList, kontakList] = await Promise.all([
         db.query('transaksi', () => true),
         db.query('lokasi', () => true),
@@ -213,8 +132,8 @@ async function resolveTransaksi(sub) {
             section: 'articleFull',
             subtitle: `Daftar Transaksi (${rows.length})`,
             lines: [
-                `<button class="slcBtn" onclick="transaksiPage.bukaTambah('jual')">+ Transaksi Jual</button>
-                 <button class="slcBtn" style="background:#555" onclick="transaksiPage.bukaTambah('beli')">+ Transaksi Beli</button>`,
+                `<button class="slcBtn" onclick="web.navigate('transaksi/jual')">+ Transaksi Jual</button>
+                 <button class="slcBtn" style="background:#555" onclick="web.navigate('transaksi/beli')">+ Transaksi Beli</button>`,
                 `table:${JSON.stringify(tableRows)}`,
             ],
             emptyText: 'Belum ada transaksi.',
@@ -240,16 +159,7 @@ async function resolveTransaksiDetail(id) {
         Jumlah: b.qty,
         'Harga Satuan': formatRupiah(b.hargaSatuan),
         Subtotal: formatRupiah(b.qty * b.hargaSatuan),
-        Aksi: trx.status === 'draft'
-            ? `<button class="slcBtn" style="background:#c0392b" onclick="transaksiPage.hapusBaris('${b.id}','${id}')">Hapus</button>`
-            : '-',
     }));
-
-    const aksiHeader = trx.status === 'draft'
-        ? `<button class="slcBtn" onclick="transaksiPage.bukaTambahBaris('${id}','${trx.tipe}')">+ Tambah Baris Produk</button>
-           <button class="slcBtn" style="background:#1e824c" onclick="transaksiPage.finalisasi('${id}')">Finalisasi</button>
-           <button class="slcBtn" style="background:#c0392b" onclick="transaksiPage.batalkan('${id}')">Batalkan</button>`
-        : `<button class="slcBtn" style="background:#555" onclick="web.navigate('transaksi')">&larr; Kembali</button>`;
 
     const pay = payments[0];
     const paymentBlock = pay ? [
@@ -270,7 +180,8 @@ async function resolveTransaksiDetail(id) {
             section: 'articleFull',
             subtitle: `Baris Produk (${baris.length}) — Total: ${formatRupiah(trx.totalBayar)}`,
             lines: [
-                aksiHeader,
+                `<button class="slcBtn" style="background:#555" onclick="web.navigate('transaksi')">&larr; Kembali</button>
+                 <button class="slcBtn" style="background:#c0392b" onclick="transaksiPage.hapus('${id}')">Hapus</button>`,
                 `table:${JSON.stringify(tableRows)}`,
                 ...paymentBlock,
             ],

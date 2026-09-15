@@ -1,138 +1,41 @@
 // ============================================================
-// pages/distribusi.js — Distribusi stok (masuk/keluar) dengan baris
-// produk (distribusi_produk). Berbeda dari produk.js/kontak.js: ini
-// dokumen "header + baris", dan baru MENGUBAH STOK saat difinalisasi
-// (status draft -> selesai), supaya dokumen bisa diedit dulu sebelum stok
-// benar-benar bergerak. Header dibuat dulu (Lokasi + Kontak, lewat
-// lokasiKontakFields() bersama), lalu baris produknya ditambah lewat
-// katalog+keranjang BERSAMA (lihat pages/shared.js) — komponen yang
-// sama dipakai kasir & transaksi, jadi bisa tambah banyak produk
-// sekaligus alih-alih satu-satu lewat dropdown.
+// pages/distribusi.js — Distribusi stok masuk (dari supplier) & keluar
+// (mutasi lokasi), lewat mesin BERSAMA createInstantDocumentPage (pages/
+// shared.js) — mesin yang SAMA PERSIS dipakai kasir.js & transaksi.js:
+// pilih Lokasi/Kontak di atas -> ketuk produk di katalog -> satu tombol
+// konfirmasi langsung membuat header + baris produk + penyesuaian stok
+// (masuk menambah, keluar mengurangi) sekali jalan, tanpa status draft
+// manual — meniru layar kasir sungguhan untuk KETIGA alur (kasir,
+// transaksi, distribusi), bukan cuma katalognya doang yang di-share.
 // ============================================================
 web.routes.distribusi = 'resolveDistribusi';
 
-// --- Katalog+keranjang untuk menambah baris produk (reuse dari shared.js) ---
-const distribusiCatalogPage = createCatalogCart('distribusiCatalogPage', {
-    cartTitle: 'Tambah Baris Produk',
+const distribusiKasirPage = createInstantDocumentPage('distribusiKasirPage', {
+    headerTable: 'distribusi', lineTable: 'distribusi_produk', headerIdField: 'distribusiId',
+    nomorPrefix: () => 'DIST-',
+    detailRoute: () => 'distribusi/detail-',
+    pageTitle: (tipe) => tipe === 'masuk' ? 'Distribusi Masuk' : 'Distribusi Keluar',
+    pageDesc: (tipe) => tipe === 'masuk'
+        ? 'Pilih lokasi tujuan & supplier di atas, ketuk produk untuk menambah ke keranjang, lalu ketuk tombol keranjang di kanan-bawah untuk selesai.'
+        : 'Pilih lokasi asal & kontak di atas, ketuk produk untuk menambah ke keranjang, lalu ketuk tombol keranjang di kanan-bawah untuk selesai.',
+    lokasiLabel: (tipe) => tipe === 'masuk' ? 'Lokasi Tujuan' : 'Lokasi Asal',
+    kontakLabel: (tipe) => tipe === 'masuk' ? 'Supplier/Distributor' : 'Kontak',
+    kontakEmptyLabel: (tipe) => tipe === 'masuk' ? 'tanpa supplier' : 'tanpa kontak',
+    kontakFilter: (k, tipe) => tipe === 'masuk' ? (k.tipe === 'supplier' || k.tipe === 'distributor') : true,
+    getPrice: (p, tipe) => tipe === 'masuk' ? (p.hargaBeli || 0) : (p.hargaJual || 0),
     allowPriceEdit: true,
-    getPrice: (p) => distribusiCatalogPage._tipe === 'masuk' ? (p.hargaBeli || 0) : (p.hargaJual || 0),
-    getStock: (p) => distribusiCatalogPage._stokMap?.[p.id] ?? null,
+    cartTitle: 'Keranjang',
     emptyCatalogMsg: 'Belum ada produk aktif.',
-    emptyCartMsg: 'Belum ada produk dipilih. Ketuk produk di atas untuk menambah baris.',
-    confirmLabel: (ctrl) => `Tambahkan ${ctrl.jumlahItem()} Baris Produk`,
-    onConfirm: async (cart, form, ctrl) => {
-        const distribusiId = ctrl._distribusiId;
-        for (const c of cart) {
-            await db.insert('distribusi_produk', {
-                distribusiId, produkId: c.produkId, qty: c.qty, hargaSatuan: c.harga,
-            });
-        }
-        web.closeDrawer();
-        web.navigate(`distribusi/detail-${distribusiId}`);
-    },
+    emptyCartMsg: 'Keranjang masih kosong. Ketuk produk di katalog untuk menambah.',
+    confirmLabel: (ctrl) => `Selesaikan (${ctrl.jumlahItem()} item)`,
+    stockDelta: (tipe) => tipe === 'masuk' ? 1 : -1,
+    // distribusi/distribusi_produk tidak punya kolom metodePembayaran/totalBayar/subtotal
+    // (lihat schema.sql) — jadi headerExtra & lineExtra sengaja tidak dipakai di sini.
 });
 
 const distribusiPage = {
-    async bukaTambah(tipe) {
-        this._lines = [];
-        const [lokasiList, kontakList] = await Promise.all([
-            db.query('lokasi', () => true),
-            db.query('kontak', k => tipe === 'masuk' ? (k.tipe === 'supplier' || k.tipe === 'distributor') : true),
-        ]);
-        if (!lokasiList.length) return alert('Buat lokasi terlebih dahulu di menu Lokasi.');
-
-        web.openDrawer({
-            title: tipe === 'masuk' ? 'Distribusi Masuk (dari Supplier)' : 'Distribusi Keluar (Mutasi Lokasi)',
-            fields: [
-                { type: 'hidden', name: 'tipe', value: tipe },
-                { type: 'text',   name: 'nomor', label: 'Nomor Dokumen', placeholder: 'Opsional, otomatis jika kosong' },
-                { type: 'text',   name: 'tanggal', label: 'Tanggal', value: new Date().toISOString().slice(0, 10) },
-                ...lokasiKontakFields(lokasiList, kontakList, {
-                    lokasiLabel: tipe === 'masuk' ? 'Lokasi Tujuan' : 'Lokasi Asal',
-                    kontakLabel: tipe === 'masuk' ? 'Supplier/Distributor' : 'Kontak (opsional)',
-                }),
-                { type: 'textarea', name: 'catatan', label: 'Catatan' },
-            ],
-            submitText: 'Simpan sebagai Draft',
-            onSubmit: 'event.preventDefault(); distribusiPage.simpanHeader(this);',
-            lines: ['form:', '**Catatan:** tambahkan baris produk setelah dokumen dibuat (dari daftar distribusi).'],
-        });
-    },
-
-    async simpanHeader(form) {
-        const val = (n) => form.querySelector(`[name="${n}"]`)?.value;
-        const data = {
-            tipe: val('tipe'), nomor: val('nomor') || ('DIST-' + Date.now().toString(36).toUpperCase()),
-            tanggal: val('tanggal') || new Date().toISOString().slice(0, 10),
-            lokasiId: val('lokasiId'), kontakId: val('kontakId') || null,
-            status: 'draft', catatan: val('catatan') || '',
-        };
-        if (!data.lokasiId) return alert('Lokasi wajib dipilih.');
-
-        try { await db.insert('distribusi', { ...data, createdAt: new Date().toISOString() }); }
-        catch (err) { return alert('Gagal menyimpan: ' + err.message); }
-
-        web.closeDrawer();
-        web.navigate('distribusi');
-    },
-
-    /** Tambah baris produk lewat katalog+keranjang bersama (bisa banyak
-     *  produk sekaligus) — sama seperti kasir, konsisten & reuse. */
-    async bukaTambahBaris(distribusiId, tipe) {
-        const [produkList, dok] = await Promise.all([
-            db.query('produk', p => p.aktif),
-            db.find('distribusi', d => d.id === distribusiId),
-        ]);
-        if (!produkList.length) return alert('Belum ada produk aktif. Tambahkan produk terlebih dahulu.');
-        const stokRows = dok ? await db.query('lokasi_produk', s => s.lokasiId === dok.lokasiId) : [];
-        distribusiCatalogPage._distribusiId = distribusiId;
-        distribusiCatalogPage._tipe = tipe;
-        distribusiCatalogPage._stokMap = Object.fromEntries(stokRows.map(s => [s.produkId, s.stok]));
-        distribusiCatalogPage.kataKunci = '';
-        distribusiCatalogPage.kategoriAktif = '';
-        distribusiCatalogPage.setProdukList(produkList);
-        distribusiCatalogPage.openPicker(`Tambah Baris — Distribusi ${tipe === 'masuk' ? 'Masuk' : 'Keluar'}`);
-    },
-
-    async hapusBaris(id, distribusiId) {
-        if (!confirm('Hapus baris ini?')) return;
-        try { await db.remove('distribusi_produk', id); } catch (err) { return alert('Gagal menghapus: ' + err.message); }
-        web.navigate(`distribusi/detail-${distribusiId}`);
-    },
-
-    /**
-     * Finalisasi dokumen: status draft -> selesai, DAN barulah stok di
-     * lokasi_produk benar-benar disesuaikan (tipe 'masuk' menambah stok,
-     * 'keluar' mengurangi). Dilakukan sekali saja (dijaga lewat cek status).
-     */
-    async finalisasi(distribusiId) {
-        if (!confirm('Finalisasi dokumen ini? Stok lokasi akan langsung disesuaikan dan tidak bisa diedit lagi.')) return;
-
-        const dok = await db.find('distribusi', d => d.id === distribusiId);
-        if (!dok) return alert('Dokumen tidak ditemukan.');
-        if (dok.status === 'selesai') return alert('Dokumen ini sudah difinalisasi sebelumnya.');
-
-        const baris = await db.query('distribusi_produk', b => b.distribusiId === distribusiId);
-        if (!baris.length) return alert('Tambahkan minimal 1 baris produk sebelum difinalisasi.');
-
-        try {
-            for (const b of baris) {
-                const existing = await db.find('lokasi_produk', s => s.lokasiId === dok.lokasiId && s.produkId === b.produkId);
-                const stokLama = existing?.stok || 0;
-                const delta = dok.tipe === 'masuk' ? b.qty : -b.qty;
-                const stokBaru = stokLama + delta;
-                if (existing) await db.update('lokasi_produk', existing.id, { stok: stokBaru });
-                else await db.insert('lokasi_produk', { lokasiId: dok.lokasiId, produkId: b.produkId, stok: stokBaru, stokMinimum: 0 });
-            }
-            await db.update('distribusi', distribusiId, { status: 'selesai' });
-        } catch (err) { return alert('Gagal memfinalisasi: ' + err.message); }
-
-        alert('Dokumen berhasil difinalisasi, stok telah disesuaikan.');
-        web.navigate(`distribusi/detail-${distribusiId}`);
-    },
-
     async hapus(id) {
-        if (!confirm('Hapus dokumen draft ini? (Dokumen yang sudah selesai sebaiknya tidak dihapus.)')) return;
+        if (!confirm('Hapus dokumen distribusi ini? Stok TIDAK dikembalikan otomatis — sesuaikan manual bila perlu.')) return;
         try { await db.remove('distribusi', id); } catch (err) { return alert('Gagal menghapus: ' + err.message); }
         web.navigate('distribusi');
     },
@@ -143,6 +46,27 @@ async function resolveDistribusi(sub) {
     if (guard) return guard;
 
     if (sub && sub.startsWith('detail-')) return resolveDistribusiDetail(sub.replace('detail-', ''));
+
+    if (sub === 'masuk' || sub === 'keluar') {
+        await distribusiKasirPage.load(sub);
+        distribusiKasirPage.kataKunci = '';
+        distribusiKasirPage.kategoriAktif = '';
+
+        const judul = sub === 'masuk' ? 'Distribusi Masuk' : 'Distribusi Keluar';
+        if (!distribusiKasirPage.lokasiList.length) {
+            return [
+                { section: 'titleHero', title: judul, description: 'Mutasi stok lewat layar kasir.' },
+                { section: 'articleFull', subtitle: 'Belum Bisa Distribusi', lines: ['Buat minimal 1 lokasi di menu Lokasi sebelum membuat dokumen distribusi.'] },
+            ];
+        }
+        if (!distribusiKasirPage.produkList.length) {
+            return [
+                { section: 'titleHero', title: judul, description: 'Mutasi stok lewat layar kasir.' },
+                { section: 'articleFull', subtitle: 'Belum Ada Produk', lines: ['Tambahkan produk aktif di menu Produk sebelum membuat dokumen distribusi.'] },
+            ];
+        }
+        return distribusiKasirPage.pageBlocks(sub);
+    }
 
     const [rows, lokasiList, kontakList] = await Promise.all([
         db.query('distribusi', () => true),
@@ -170,8 +94,8 @@ async function resolveDistribusi(sub) {
             section: 'articleFull',
             subtitle: `Daftar Distribusi (${rows.length})`,
             lines: [
-                `<button class="slcBtn" onclick="distribusiPage.bukaTambah('masuk')">+ Distribusi Masuk</button>
-                 <button class="slcBtn" style="background:#555" onclick="distribusiPage.bukaTambah('keluar')">+ Distribusi Keluar</button>`,
+                `<button class="slcBtn" onclick="web.navigate('distribusi/masuk')">+ Distribusi Masuk</button>
+                 <button class="slcBtn" style="background:#555" onclick="web.navigate('distribusi/keluar')">+ Distribusi Keluar</button>`,
                 `table:${JSON.stringify(tableRows)}`,
             ],
             emptyText: 'Belum ada dokumen distribusi.',
@@ -196,16 +120,7 @@ async function resolveDistribusiDetail(id) {
         Jumlah: b.qty,
         'Harga Satuan': formatRupiah(b.hargaSatuan),
         Subtotal: formatRupiah(b.qty * b.hargaSatuan),
-        Aksi: dok.status === 'draft'
-            ? `<button class="slcBtn" style="background:#c0392b" onclick="distribusiPage.hapusBaris('${b.id}','${id}')">Hapus</button>`
-            : '-',
     }));
-
-    const aksiHeader = dok.status === 'draft'
-        ? `<button class="slcBtn" onclick="distribusiPage.bukaTambahBaris('${id}','${dok.tipe}')">+ Tambah Baris Produk</button>
-           <button class="slcBtn" style="background:#1e824c" onclick="distribusiPage.finalisasi('${id}')">Finalisasi</button>
-           <button class="slcBtn" style="background:#c0392b" onclick="distribusiPage.hapus('${id}')">Hapus Dokumen</button>`
-        : '';
 
     return [
         { section: 'titleHero', title: `Distribusi ${dok.tipe === 'masuk' ? 'Masuk' : 'Keluar'} — ${dok.nomor}`,
@@ -214,8 +129,8 @@ async function resolveDistribusiDetail(id) {
             section: 'articleFull',
             subtitle: `Baris Produk (${baris.length})`,
             lines: [
-                `${aksiHeader}
-                 <button class="slcBtn" style="background:#555" onclick="web.navigate('distribusi')">&larr; Kembali</button>`,
+                `<button class="slcBtn" style="background:#555" onclick="web.navigate('distribusi')">&larr; Kembali</button>
+                 <button class="slcBtn" style="background:#c0392b" onclick="distribusiPage.hapus('${id}')">Hapus</button>`,
                 `table:${JSON.stringify(tableRows)}`,
             ],
             emptyText: 'Belum ada baris produk pada dokumen ini.',

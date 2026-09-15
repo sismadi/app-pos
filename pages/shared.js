@@ -1,33 +1,23 @@
 // ============================================================
 // pages/shared.js — Komponen BERSAMA lintas halaman transaksional
-// (kasir, distribusi, transaksi). Ketiganya sama-sama butuh dua hal:
-//   1) memilih Lokasi (+ Kontak)  -> lokasiKontakFields()
-//   2) memilih produk + jumlah dari katalog, lalu keranjang -> createCatalogCart()
-// Sebelumnya logika katalog+keranjang cuma ada di kasir.js (duplikasi
-// kalau mau dipakai di tempat lain); sekarang dipindah ke sini supaya
-// distribusi.js & transaksi.js bisa PAKAI ULANG persis komponen yang
-// sama saat menambah baris produk, alih-alih form dropdown satu produk
-// per submit. Konsisten, DRY, dan mudah dipakai halaman baru nanti
-// (scalable) — dimuat PALING AWAL (lihat dataset.js) supaya siap dipakai
-// semua pages/*.js lain.
+// (kasir, distribusi, transaksi). Dua lapis reuse di sini:
+//   1) createCatalogCart()          -> "mesin" katalog produk + keranjang
+//   2) createInstantDocumentPage()  -> "layar kasir" LENGKAP di atas
+//      createCatalogCart: header bar Lokasi/Kontak + katalog + keranjang
+//      + SATU tombol yang langsung membuat dokumen (header + baris +
+//      penyesuaian stok), tanpa status draft manual.
+// Ketiga halaman (kasir, transaksi jual/beli, distribusi masuk/keluar)
+// memakai createInstantDocumentPage() dengan PERSIS mesin yang sama —
+// yang beda cuma cfg (nama tabel, arah stok, label, dst, lihat komentar
+// di atas fungsinya). Konsisten, DRY, dan mudah dipakai halaman baru
+// nanti (scalable) — dimuat PALING AWAL (lihat dataset.js) supaya siap
+// dipakai semua pages/*.js lain.
 //
 // Pola "override-only": createCatalogCart() mengembalikan OBJEK DASAR
 // dengan method generik (grid, cari, filter kategori, baris keranjang).
-// Halaman pemanggil menimpa/menambah method di atasnya sesuai kebutuhan
-// masing-masing (checkout instan di kasir, simpan-banyak-baris di
-// distribusi/transaksi) — bagian generiknya tidak pernah diulang.
+// createInstantDocumentPage() menimpa/menambah method di atasnya untuk
+// jadi layar kasir lengkap — bagian generiknya tidak pernah diulang.
 // ============================================================
-
-/** Definisi field <select> Lokasi & Kontak, dipakai ulang oleh form header
- *  kasir/distribusi/transaksi supaya label & opsi selalu konsisten. */
-function lokasiKontakFields(lokasiList, kontakList, opts = {}) {
-    return [
-        { type: 'select', name: 'lokasiId', label: opts.lokasiLabel || 'Lokasi', required: opts.lokasiRequired !== false,
-          options: lokasiList.map(l => ({ value: l.id, label: `${l.nama} (${l.tipe === 'toko' ? 'Toko' : 'Gudang'})` })) },
-        { type: 'select', name: 'kontakId', label: opts.kontakLabel || 'Kontak (opsional)',
-          options: kontakList.map(k => ({ value: k.id, label: k.nama })) },
-    ];
-}
 
 /**
  * createCatalogCart(name, cfg) — "mesin" katalog produk (cari + filter
@@ -218,4 +208,180 @@ function createCatalogCart(name, cfg) {
     };
     window[name] = ctrl;
     return ctrl;
+}
+
+/**
+ * createInstantDocumentPage(name, cfg) — mesin "layar kasir" BERSAMA:
+ * header bar Lokasi/Kontak DI ATAS (bukan form modal terpisah) + katalog
+ * produk + keranjang (dari createCatalogCart), dan SATU tombol konfirmasi
+ * yang langsung membuat dokumen — header, baris produk, DAN penyesuaian
+ * stok — sekali jalan, tanpa status draft manual. Sebelumnya pola ini
+ * cuma ada di kasir.js (checkout instan transaksi jual); sekarang
+ * diekstrak ke sini supaya kasir, transaksi (jual/beli), dan distribusi
+ * (masuk/keluar) memakai PERSIS mesin yang sama — bukan cuma katalognya,
+ * tapi seluruh layar "pilih lokasi/kontak -> pilih produk -> selesai".
+ *
+ * cfg:
+ *   headerTable, lineTable       nama tabel header & baris
+ *   headerIdField                nama kolom FK di lineTable, mis. 'transaksiId'
+ *   nomorPrefix(tipe)             -> prefix nomor dokumen otomatis
+ *   detailRoute(tipe)             -> prefix rute detail, mis. 'transaksi/detail-'
+ *   pageTitle(tipe), pageDesc(tipe)     judul & deskripsi titleHero
+ *   lokasiLabel(tipe), kontakLabel(tipe), kontakEmptyLabel(tipe)
+ *   kontakFilter(k, tipe)         predikat db.query('kontak', ...)
+ *   getPrice(p, tipe)             harga satuan yang ditampilkan/dipakai
+ *   allowPriceEdit                 opsional — harga bisa diubah per baris
+ *   stockDelta(tipe)               -> +1 (menambah stok) / -1 (mengurangi)
+ *   cartTitle, emptyCatalogMsg, emptyCartMsg
+ *   confirmLabel(ctrl)
+ *   extraFieldsHtml(tipe)          opsional -> field tambahan di atas tombol konfirmasi
+ *   readExtra(form, tipe)          opsional -> baca field tambahan jadi object
+ *   headerExtra(ctrl, extra, tipe) opsional -> field tambahan utk baris header (mis. metodePembayaran/totalBayar)
+ *   lineExtra(c)                   opsional -> field tambahan per baris produk (mis. subtotal)
+ *   afterConfirm(header, cart, tipe, ctrl)  opsional hook (mis. bikin pembayaran QRIS)
+ */
+function createInstantDocumentPage(name, cfg) {
+    const page = Object.assign(createCatalogCart(name, {
+        cartTitle: cfg.cartTitle,
+        allowPriceEdit: cfg.allowPriceEdit || false,
+        getPrice: (p) => cfg.getPrice(p, page.tipe),
+        getStock: (p) => page.stokMap[p.id] ?? null,
+        emptyCatalogMsg: cfg.emptyCatalogMsg,
+        emptyCartMsg: cfg.emptyCartMsg,
+        extraFieldsHtml: cfg.extraFieldsHtml ? () => cfg.extraFieldsHtml(page.tipe) : undefined,
+        confirmLabel: cfg.confirmLabel || ((ctrl) => `Simpan (${formatRupiah(ctrl.total())})`),
+        onCartChange: (ctrl) => ctrl.updateFab(),
+        onConfirm: async (cart, form) => page.simpan(cart, form),
+    }), {
+        // --- State khusus: tipe dokumen aktif, lokasi & kontak dipilih di atas ---
+        tipe: '',
+        lokasiList: [],
+        kontakList: [],
+        lokasiId: '',
+        kontakId: '',
+        stokMap: {},
+
+        async load(tipe) {
+            this.tipe = tipe;
+            const [lokasi, kontak] = await Promise.all([
+                db.query('lokasi', () => true),
+                db.query('kontak', k => cfg.kontakFilter(k, tipe)),
+            ]);
+            this.lokasiList = lokasi;
+            this.kontakList = kontak;
+            if (!this.lokasiId || !lokasi.some(l => l.id === this.lokasiId)) this.lokasiId = lokasi[0]?.id || '';
+            this.kontakId = '';
+            await this.muatKatalogLokasi();
+        },
+
+        /** Muat ulang katalog + peta stok untuk lokasi aktif — dipanggil saat
+         *  masuk halaman dan tiap kali GANTI lokasi. */
+        async muatKatalogLokasi() {
+            const [produk, stok] = await Promise.all([
+                db.query('produk', p => p.aktif),
+                this.lokasiId ? db.query('lokasi_produk', s => s.lokasiId === this.lokasiId) : Promise.resolve([]),
+            ]);
+            this.stokMap = Object.fromEntries(stok.map(s => [s.produkId, s.stok]));
+            this.setProdukList(produk); // reset keranjang juga: stok/harga per lokasi bisa beda
+        },
+
+        async gantiLokasi(lokasiId) {
+            this.lokasiId = lokasiId;
+            await this.muatKatalogLokasi();
+            this.renderGrid();
+            this.updateFab();
+        },
+
+        gantiKontak(kontakId) { this.kontakId = kontakId; },
+
+        headerBarHtml() {
+            const lokasiOpt = this.lokasiList.map(l =>
+                `<option value="${l.id}" ${l.id === this.lokasiId ? 'selected' : ''}>${l.nama}</option>`).join('');
+            const kontakOpt = this.kontakList.map(k =>
+                `<option value="${k.id}" ${k.id === this.kontakId ? 'selected' : ''}>${k.nama}</option>`).join('');
+            return `
+                <div class="catcart-header-bar">
+                    <label>${cfg.lokasiLabel ? cfg.lokasiLabel(this.tipe) : 'Lokasi'}
+                        <select onchange="${this._name}.gantiLokasi(this.value)">${lokasiOpt}</select>
+                    </label>
+                    <label>${cfg.kontakLabel ? cfg.kontakLabel(this.tipe) : 'Kontak'}
+                        <select onchange="${this._name}.gantiKontak(this.value)">
+                            <option value="">&mdash; ${cfg.kontakEmptyLabel ? cfg.kontakEmptyLabel(this.tipe) : 'tanpa kontak'} &mdash;</option>${kontakOpt}
+                        </select>
+                    </label>
+                </div>`;
+        },
+
+        updateFab() {
+            const fab = web.gebi(`${this._name}Fab`);
+            if (!fab) return;
+            fab.querySelector('.catcart-fab-count').textContent = this.jumlahItem();
+            fab.querySelector('.catcart-fab-total').textContent = formatRupiah(this.total());
+            fab.classList.toggle('hide', this.jumlahItem() === 0);
+        },
+
+        /** Checkout langsung: header + baris + penyesuaian stok + hook opsional
+         *  (mis. pembayaran QRIS), tanpa lewat status draft — SATU mesin dipakai
+         *  identik oleh kasir, transaksi, dan distribusi (cuma tabel & arah
+         *  stoknya beda, lihat cfg). */
+        async simpan(cart, form) {
+            if (!this.lokasiId) return alert('Pilih lokasi terlebih dahulu.');
+            const extra = cfg.readExtra ? cfg.readExtra(form, this.tipe) : {};
+
+            const header = await db.insert(cfg.headerTable, {
+                tipe: this.tipe,
+                nomor: (cfg.nomorPrefix ? cfg.nomorPrefix(this.tipe) : 'DOC-') + Date.now().toString(36).toUpperCase(),
+                tanggal: new Date().toISOString().slice(0, 10),
+                lokasiId: this.lokasiId, kontakId: this.kontakId || null,
+                status: 'draft', catatan: '',
+                ...(cfg.headerExtra ? cfg.headerExtra(this, extra, this.tipe) : {}),
+                createdAt: new Date().toISOString(),
+            });
+
+            for (const c of cart) {
+                await db.insert(cfg.lineTable, {
+                    [cfg.headerIdField]: header.id, produkId: c.produkId, qty: c.qty, hargaSatuan: c.harga,
+                    ...(cfg.lineExtra ? cfg.lineExtra(c) : {}),
+                });
+            }
+
+            const arah = cfg.stockDelta ? cfg.stockDelta(this.tipe) : -1;
+            for (const c of cart) {
+                const existing = await db.find('lokasi_produk', s => s.lokasiId === this.lokasiId && s.produkId === c.produkId);
+                const stokLama = existing?.stok || 0;
+                const stokBaru = stokLama + arah * c.qty;
+                if (existing) await db.update('lokasi_produk', existing.id, { stok: stokBaru });
+                else await db.insert('lokasi_produk', { lokasiId: this.lokasiId, produkId: c.produkId, stok: stokBaru, stokMinimum: 0 });
+            }
+
+            await db.update(cfg.headerTable, header.id, { status: 'selesai' });
+            if (cfg.afterConfirm) await cfg.afterConfirm(header, cart, this.tipe, this);
+
+            this.updateFab();
+            web.closeDrawer();
+            web.navigate((cfg.detailRoute ? cfg.detailRoute(this.tipe) : '') + header.id);
+        },
+
+        /** Blok halaman penuh "layar kasir" (header bar + toolbar + grid +
+         *  FAB keranjang) — dipakai identik oleh resolver rute kasir/
+         *  transaksi-jual/transaksi-beli/distribusi-masuk/distribusi-keluar. */
+        pageBlocks(tipe) {
+            const catalogHtml = `
+                <div id="${this._name}HeaderBar">${this.headerBarHtml()}</div>
+                <div class="catcart-toolbar">
+                    <input type="search" placeholder="Cari produk..." oninput="${this._name}.cariProduk(this.value)" class="catcart-search">
+                    <div class="catcart-chips" id="${this._name}Chips">${this.chipsHtml()}</div>
+                </div>
+                <div id="${this._name}Grid">${this.gridHtml()}</div>
+                <div class="catcart-fab hide" id="${this._name}Fab" onclick="${this._name}.openCart()">
+                    <span>&#128722; <span class="catcart-fab-count">0</span> item</span>
+                    <span class="catcart-fab-total">Rp0</span>
+                </div>`;
+            return [
+                { section: 'titleHero', title: cfg.pageTitle ? cfg.pageTitle(tipe) : 'Dokumen', description: cfg.pageDesc ? cfg.pageDesc(tipe) : '' },
+                { section: 'articleFull', lines: [catalogHtml] },
+            ];
+        },
+    });
+    return page;
 }

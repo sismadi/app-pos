@@ -36,6 +36,16 @@ async function resolveDashboard() {
         .sort((a, b) => b.value - a.value)
         .slice(0, 5);
 
+    // Laba bersih (Modul Keuangan) hanya dihitung & ditampilkan untuk owner —
+    // pakai mesin yang sama dgn pages/laporan.js, tidak ada logika duplikat.
+    const statLaba = [];
+    if (user.role === 'owner' && typeof laporanPage !== 'undefined') {
+        const saldoList = await laporanPage.hitungSaldoAkun();
+        const pendapatan = saldoList.filter(s => s.akun.tipe === 'pendapatan').reduce((s, r) => s + r.saldoAkhir, 0);
+        const beban = saldoList.filter(s => s.akun.tipe === 'beban').reduce((s, r) => s + r.saldoAkhir, 0);
+        statLaba.push({ value: formatRupiah(pendapatan - beban), label: (pendapatan - beban) >= 0 ? 'Laba Bersih' : 'Rugi Bersih' });
+    }
+
     return [
         { section: 'titleHero', title: 'Dashboard', description: `Selamat datang kembali, <strong>${user.name}</strong> &mdash; ${user.tenantNama}.` },
         {
@@ -47,6 +57,7 @@ async function resolveDashboard() {
                 { value: produkList.length, label: 'Total Produk' },
                 { value: lokasiList.length, label: 'Total Lokasi' },
                 { value: stokMenipis, label: 'Baris Stok Menipis' },
+                ...statLaba,
             ],
         },
         { section: 'barChart', title: 'Produk Terlaris (Jumlah Terjual)', items: terlaris },
@@ -64,6 +75,8 @@ async function resolveDashboard() {
                     'link:Distribusi Stok:distribusi',
                     '---',
                     'link:Kontak:kontak',
+                    // Modul Keuangan (akun/jurnal/laporan) hanya untuk owner — lihat dataset.js.
+                    ...(user.role === 'owner' ? ['---', 'link:Laporan Keuangan:laporan'] : []),
                 ],
             },
             rightCol: {

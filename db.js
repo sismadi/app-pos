@@ -20,6 +20,7 @@ const SCOPED_TABLES = new Set([
     'distribusi', 'distribusi_produk',
     'transaksi', 'transaksi_produk',
     'payment',
+    'akun', 'jurnal', 'jurnal_detail',
 ]);
 
 async function apiGet(path) {

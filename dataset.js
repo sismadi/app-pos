@@ -21,6 +21,9 @@ const siteConfig = [
     { slug: 'lokasi',      label: 'Lokasi',    menu: true, role: ['owner', 'gudang'] },
     { slug: 'distribusi',  label: 'Distribusi', menu: true, role: ['owner', 'gudang'] },
     { slug: 'kontak',      label: 'Kontak',    menu: true, role: ['owner', 'kasir', 'gudang'] },
+    { slug: 'akun',        label: 'Akun',      menu: true, role: ['owner'] },
+    { slug: 'jurnal',      label: 'Jurnal',    menu: true, role: ['owner'] },
+    { slug: 'laporan',     label: 'Laporan Keuangan', menu: true, role: ['owner'] },
     { slug: 'tenant',      label: 'Kelola Tenant', menu: true, role: ['superadmin'] },
     { slug: 'login',       label: 'Masuk',     menu: true, guestOnly: true },
 ];
@@ -40,6 +43,9 @@ const pageFiles = [
     'pages/distribusi.js',
     'pages/transaksi.js',
     'pages/kasir.js',
+    'pages/akun.js',
+    'pages/jurnal.js',
+    'pages/laporan.js',
     'pages/tenant.js',
     'pages/dashboard.js',
 ];

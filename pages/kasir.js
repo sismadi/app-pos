@@ -36,8 +36,10 @@ const kasirPage = createInstantDocumentPage('kasirPage', {
     lineExtra: (c) => ({ subtotal: c.qty * c.harga }),
     confirmLabel: (ctrl) => `Bayar ${formatRupiah(ctrl.total())}`,
     stockDelta: () => -1,
-    afterConfirm: async (header) => {
+    afterConfirm: async (header, cart, tipe, ctrl) => {
         if (header.metodePembayaran === 'qris') await qrisPage.buatPembayaran(header.id, header.totalBayar);
+        // Posting jurnal otomatis (Modul Keuangan) — mesin sama dgn transaksi.js, lihat pages/jurnal.js.
+        await jurnalPage.postingTransaksi(header, cart, ctrl);
     },
 });
 

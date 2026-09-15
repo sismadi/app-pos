@@ -28,9 +28,15 @@ pos-app/
     lokasi.js       -> CRUD lokasi (toko/gudang) + kelola stok per lokasi
     distribusi.js   -> mutasi stok masuk/keluar + finalisasi stok
     transaksi.js    -> transaksi jual/beli + finalisasi stok + pembayaran QRIS
+    akun.js         -> CRUD Bagan Akun (Chart of Accounts) — Modul Keuangan
+    jurnal.js       -> Jurnal Umum manual + posting otomatis dari transaksi — Modul Keuangan
+    laporan.js      -> Neraca Saldo, Laba Rugi, Neraca, Perubahan Ekuitas — Modul Keuangan
     tenant.js       -> kelola daftar tenant (khusus superadmin)
-    dashboard.js    -> ringkasan KPI + produk terlaris
+    dashboard.js    -> ringkasan KPI + produk terlaris (+ laba bersih utk owner)
 ```
+
+Skema D1 (`schema.sql`) juga bertambah 3 tabel untuk modul ini: `akun`,
+`jurnal`, `jurnal_detail` — lihat bagian "Modul Keuangan" di bawah.
 
 ## Model Data Multi-Tenant
 
@@ -63,6 +69,39 @@ Akun demo (dari seed `schema.sql`):
 - **Payment (QRIS)** — saat transaksi jual dengan metode QRIS difinalisasi,
   dibuat 1 baris di tabel `payment` berstatus `pending`. Tombol "Tandai
   Lunas (Simulasi)" menggantikan webhook gateway pembayaran sungguhan.
+
+## Modul Keuangan (Akun, Jurnal, Neraca, Laba Rugi, Ekuitas)
+
+Ditambahkan di atas pola *header + baris* yang sama dengan Transaksi/Distribusi,
+dan sengaja HANYA bisa diakses peran **owner** (`role: ['owner']` di
+`dataset.js`/`requireLogin`) karena berisi data keuangan toko.
+
+- **Akun (`akun`)** — Bagan Akun (Chart of Accounts): kode, nama, tipe
+  (aset/kewajiban/ekuitas/pendapatan/beban), saldo normal (turunan otomatis
+  dari tipe), dan saldo awal. Master data untuk Jurnal & Laporan.
+- **Jurnal (`jurnal` + `jurnal_detail`)** — Jurnal Umum, baris debit/kredit
+  yang wajib seimbang sebelum disimpan. Dua sumber:
+  1. **Manual** — lewat tombol "+ Input Jurnal Manual" (mis. setoran modal,
+     prive, beban operasional).
+  2. **Otomatis** — dipasang lewat hook `afterConfirm` yang SUDAH ADA di
+     `createInstantDocumentPage` (`pages/shared.js`, sebelumnya dipakai utk
+     pembayaran QRIS) — `jurnalPage.postingTransaksi()` dipanggil dari
+     `kasir.js` & `transaksi.js` setiap transaksi jual/beli selesai, dan
+     `jurnalPage.postingPelunasanQris()` dipanggil saat pembayaran QRIS
+     ditandai lunas. **`shared.js` sendiri tidak diubah sama sekali.**
+     Akun dicari lewat **kode baku** (1101 Kas, 1103 Piutang QRIS,
+     1104 Persediaan, 2101 Utang Usaha, 4101 Penjualan, 5101 HPP) — kalau
+     salah satu akun belum ada di COA tenant, posting otomatis dilewati
+     tanpa menggagalkan transaksinya.
+- **Laporan (`laporan`)** — Neraca Saldo, Laba Rugi, Neraca, dan Perubahan
+  Ekuitas, SEMUANYA dihitung real-time dari `akun` + `jurnal_detail`
+  (`laporanPage.hitungSaldoAkun()`) — tidak ada tabel/data laporan yang
+  disimpan ganda, satu sumber kebenaran.
+
+Bagan akun demo (seed `schema.sql`, untuk `tnt_demo`): Kas, Bank, Piutang
+Usaha (QRIS), Persediaan Barang Dagang, Utang Usaha, Modal Pemilik, Prive
+Pemilik, Penjualan, HPP, dan Beban Operasional — saldo awal sudah diatur
+seimbang (Aset = Ekuitas) supaya Neraca langsung "Seimbang ✓" sejak awal.
 
 ## Menjalankan
 
@@ -100,3 +139,12 @@ wrangler deploy
 4. Belum ada validasi lanjutan seperti pencegahan stok negatif saat
    finalisasi transaksi jual (stok bisa jadi minus jika stok tidak
    mencukupi) — pertimbangkan menambah pengecekan ini sebelum dipakai nyata.
+5. **Modul Keuangan disederhanakan untuk demo**: (a) Distribusi masuk/keluar
+   TIDAK diposting ke jurnal karena dianggap mutasi stok internal, bukan
+   transaksi yang mengubah aset/kewajiban/ekuitas — kalau dipakai lintas
+   entitas hukum yang berbeda, ini perlu ditinjau ulang; (b) tidak ada pajak/
+   diskon dalam perhitungan Laba Rugi; (c) "Laba Tahun Berjalan" di Neraca &
+   Perubahan Ekuitas dihitung sejak akun mulai dipakai (tidak ada mekanisme
+   tutup buku/periode akuntansi) — untuk produksi sungguhan, tambahkan proses
+   tutup buku yang memindahkan saldo Laba Rugi ke akun Laba Ditahan tiap akhir
+   periode.

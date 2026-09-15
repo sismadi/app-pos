@@ -40,8 +40,11 @@ const transaksiKasirPage = createInstantDocumentPage('transaksiKasirPage', {
     lineExtra: (c) => ({ subtotal: c.qty * c.harga }),
     confirmLabel: (ctrl) => `Selesaikan (${formatRupiah(ctrl.total())})`,
     stockDelta: (tipe) => tipe === 'jual' ? -1 : 1,
-    afterConfirm: async (header) => {
+    afterConfirm: async (header, cart, tipe, ctrl) => {
         if (header.metodePembayaran === 'qris') await qrisPage.buatPembayaran(header.id, header.totalBayar);
+        // Posting jurnal otomatis (Modul Keuangan) — lihat pages/jurnal.js.
+        // Dilewati diam-diam kalau COA belum lengkap, transaksi tetap tersimpan.
+        await jurnalPage.postingTransaksi(header, cart, ctrl);
     },
 });
 
@@ -70,8 +73,12 @@ const qrisPage = {
     /** Simulasi konfirmasi pembayaran (menggantikan webhook gateway sungguhan pada demo ini). */
     async tandaiLunas(paymentId, transaksiId) {
         if (!confirm('Tandai pembayaran ini sebagai LUNAS? (Pada aplikasi produksi, ini normalnya otomatis lewat webhook gateway QRIS.)')) return;
-        try { await db.update('payment', paymentId, { status: 'lunas', paidAt: new Date().toISOString() }); }
-        catch (err) { return alert('Gagal memperbarui status: ' + err.message); }
+        try {
+            const payment = await db.find('payment', p => p.id === paymentId);
+            await db.update('payment', paymentId, { status: 'lunas', paidAt: new Date().toISOString() });
+            // Reklasifikasi Piutang Usaha (QRIS) -> Kas di jurnal (Modul Keuangan).
+            if (payment) await jurnalPage.postingPelunasanQris(payment);
+        } catch (err) { return alert('Gagal memperbarui status: ' + err.message); }
         web.navigate(`transaksi/detail-${transaksiId}`);
     },
 };

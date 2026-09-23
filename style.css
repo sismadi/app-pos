@@ -186,12 +186,20 @@ a:hover { text-decoration: underline; }
 
 .hero h1 { font-size: 56px; line-height: 1; }
 
-.img       { width: 100%; height: auto; }
-.img svg   { width: 100%; height: auto; fill: white; }
+/* [PERF/CLS] Kotak ikon diberi ukuran TETAP di sini (bukan hanya di
+   `.img svg`/`.simg svg`), supaya ruangnya sudah dicadangkan sejak
+   render pertama — sebelum svg.di() menyuntik <svg> ke dalamnya.
+   Tanpa ini, elemen <i class="di-*"> kosong punya tinggi ~0px lalu
+   melompat ke ukuran penuh begitu ikon disisipkan, menyebabkan layout
+   shift (CLS) yang terasa seperti halaman render ulang. */
+.img       { display: inline-block; width: 100%; aspect-ratio: 1 / 1; }
+.img svg   { display: block; width: 100%; height: 100%; fill: white; }
 .img svg path { fill: white; stroke: none; }
 
-.simg svg   { stroke: black; height: 70px; width: 70px; }
-.img-32 svg { stroke: black; height: 32px; width: 32px; }
+.simg       { display: inline-block; width: 70px; height: 70px; }
+.simg svg   { display: block; stroke: black; height: 100%; width: 100%; }
+.img-32     { display: inline-block; width: 32px; height: 32px; }
+.img-32 svg { display: block; stroke: black; height: 100%; width: 100%; }
 
 .img-hero {
   width: 80%;

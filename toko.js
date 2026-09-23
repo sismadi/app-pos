@@ -120,27 +120,40 @@ async function resolveToko(sub) {
     }
 
     // --- Daftar semua toko (?toko) ---
-    let daftar = [];
-    try {
-        daftar = await db.storefrontTokoList();
-    } catch (err) {
-        return [{ section: 'titleHero', title: 'Belanja', description: 'Gagal memuat daftar toko: ' + escHtml(err.message) }];
-    }
-
-    const kartu = daftar.map(t => `
-        <button type="button" class="catcart-product-card" onclick='web.navigate(${JSON.stringify('toko/' + (t.slug || t.id))})'>
-            <span class="catcart-product-nama">${escHtml(t.nama)}</span>
-            <span class="catcart-product-kategori">${escHtml(t.deskripsi || t.alamat || '') || '&nbsp;'}</span>
-            ${t.telepon ? `<span class="catcart-product-harga">${escHtml(t.telepon)}</span>` : ''}
-        </button>`).join('');
+    // [PERF] Dulu seluruh halaman (termasuk judul & deskripsi statis di
+    // atas) menunggu db.storefrontTokoList() selesai sebelum ADA APA PUN
+    // yang dirender — LCP jadi terikat ke waktu round-trip fetch ke Worker
+    // API. Sekarang shell halaman dikembalikan LANGSUNG (tanpa menunggu
+    // fetch), grid daftar toko diisi belakangan lewat renderTokoListGrid()
+    // begitu data datang — LCP tidak lagi menunggu network sama sekali.
+    db.storefrontTokoList()
+        .then(renderTokoListGrid)
+        .catch(err => renderTokoListGrid(null, err));
 
     return [
         { section: 'titleHero', title: 'Belanja', description: 'Pilih toko untuk melihat produk & langsung memesan — tanpa perlu akun.' },
         {
             section: 'articleFull',
-            lines: daftar.length
-                ? [`<div class="catcart-grid">${kartu}</div>`]
-                : ['Belum ada toko yang membuka etalase online saat ini.'],
+            lines: [`<div class="catcart-grid" id="tokoListGrid"><p>Memuat daftar toko&hellip;</p></div>`],
         },
     ];
+}
+
+/** Isi grid daftar toko setelah fetch selesai. Cek elemen masih ada di DOM
+ *  dulu — kalau pengguna sudah pindah halaman sebelum fetch selesai,
+ *  #tokoListGrid sudah tidak ada lagi (halaman baru sudah menimpanya),
+ *  jadi aman diam saja (tidak perlu guard seq seperti di web.navigate). */
+function renderTokoListGrid(daftar, err) {
+    const grid = web.gebi('tokoListGrid');
+    if (!grid) return;
+
+    if (err) { grid.innerHTML = `<p>Gagal memuat daftar toko: ${escHtml(err.message)}</p>`; return; }
+    if (!daftar || !daftar.length) { grid.innerHTML = 'Belum ada toko yang membuka etalase online saat ini.'; return; }
+
+    grid.innerHTML = daftar.map(t => `
+        <button type="button" class="catcart-product-card" onclick='web.navigate(${JSON.stringify('toko/' + (t.slug || t.id))})'>
+            <span class="catcart-product-nama">${escHtml(t.nama)}</span>
+            <span class="catcart-product-kategori">${escHtml(t.deskripsi || t.alamat || '') || '&nbsp;'}</span>
+            ${t.telepon ? `<span class="catcart-product-harga">${escHtml(t.telepon)}</span>` : ''}
+        </button>`).join('');
 }

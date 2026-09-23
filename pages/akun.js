@@ -3,7 +3,9 @@
 // file ini SAMA PERSIS dengan produk.js (list + drawer tambah/edit +
 // hapus, lihat komentar di sana) — akun adalah master data yang dipakai
 // oleh Jurnal (pages/jurnal.js) dan Laporan Keuangan (pages/laporan.js).
-// Hanya peran 'owner' yang boleh membuka menu ini (data keuangan).
+// Hanya peran 'owner' yang boleh membuka menu ini (data keuangan) —
+// juga ditegakkan di backend lewat WRITE_ROLES (lihat worker.js).
+// [SECURITY] lihat catatan rawKeys/JSON.stringify di produk.js.
 // ============================================================
 web.routes.akun = 'resolveAkun';
 
@@ -23,8 +25,8 @@ const akunPage = {
     fields(a = {}) {
         return [
             { type: 'hidden', name: 'id', value: a.id || '' },
-            { type: 'text',   name: 'kode', label: 'Kode Akun', value: a.kode || '', required: true, placeholder: 'mis. 1101' },
-            { type: 'text',   name: 'nama', label: 'Nama Akun', value: a.nama || '', required: true },
+            { type: 'text',   name: 'kode', label: 'Kode Akun', value: a.kode || '', required: true, placeholder: 'mis. 1101', maxlength: 20 },
+            { type: 'text',   name: 'nama', label: 'Nama Akun', value: a.nama || '', required: true, maxlength: 120 },
             { type: 'select', name: 'tipe', label: 'Tipe Akun', value: a.tipe || 'aset',
               options: TIPE_AKUN.map(t => ({ value: t.value, label: t.label })) },
             { type: 'number', name: 'saldoAwal', label: 'Saldo Awal', value: a.saldoAwal ?? 0 },
@@ -102,8 +104,8 @@ async function resolveAkun() {
             'Saldo Normal': a.saldoNormal === 'debit' ? 'Debit' : 'Kredit',
             'Saldo Awal': formatRupiah(a.saldoAwal),
             Status: a.aktif ? '<span class="badge">Aktif</span>' : '<span class="badge badge-muted">Nonaktif</span>',
-            Aksi: `<button class="slcBtn" onclick="akunPage.bukaEdit('${a.id}')">Edit</button>
-                   <button class="slcBtn" style="background:#c0392b" onclick="akunPage.hapus('${a.id}')">Hapus</button>`,
+            Aksi: `<button class="slcBtn" onclick='akunPage.bukaEdit(${JSON.stringify(a.id)})'>Edit</button>
+                   <button class="slcBtn" style="background:#c0392b" onclick='akunPage.hapus(${JSON.stringify(a.id)})'>Hapus</button>`,
         }));
 
     return [
@@ -117,6 +119,7 @@ async function resolveAkun() {
                  <button class="slcBtn" style="background:#555" onclick="web.navigate('laporan')">Lihat Laporan Keuangan</button>`,
                 `table:${JSON.stringify(tableRows)}`,
             ],
+            tableOpts: { rawKeys: ['Status', 'Aksi'] },
             emptyText: 'Belum ada akun. Klik "+ Tambah Akun" untuk mulai.',
         },
     ];

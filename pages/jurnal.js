@@ -14,6 +14,15 @@
 //
 // Sama seperti kasir/transaksi/distribusi: begitu baris seimbang,
 // langsung status 'posted' — tidak ada draft->posting manual terpisah.
+//
+// [SECURITY] Form input manual jurnal (bukaForm) TETAP dalam drawer,
+// hanya markupnya dirakit manual (bodyHtml) karena tabel baris perlu
+// tambah/hapus baris dinamis — bukan pengecualian dari aturan "semua
+// form dalam drawer". Nilai b.keterangan & opsi akun (a.kode/a.nama,
+// keduanya bisa diisi bebas lewat form Akun) di-escHtml() sebelum masuk
+// atribut/isi tag, karena baris ini dirender ulang tiap kali pengguna
+// mengetik (renderBarisForm) — tanpa escaping, XSS bisa langsung
+// tereksekusi SAAT MENGETIK di form ini sendiri.
 // ============================================================
 web.routes.jurnal = 'resolveJurnal';
 
@@ -76,11 +85,11 @@ const jurnalPage = {
     barisRowHtml(b, i) {
         const opts = this.akunList
             .filter(a => a.aktif)
-            .map(a => `<option value="${a.id}" ${a.id === b.akunId ? 'selected' : ''}>${a.kode} — ${a.nama}</option>`)
+            .map(a => `<option value="${escHtml(a.id)}" ${a.id === b.akunId ? 'selected' : ''}>${escHtml(a.kode)} — ${escHtml(a.nama)}</option>`)
             .join('');
         return `<tr>
             <td><select onchange="jurnalPage.ubahBaris(${i},'akunId',this.value)"><option value="">— pilih akun —</option>${opts}</select></td>
-            <td><input type="text" value="${b.keterangan}" oninput="jurnalPage.ubahBaris(${i},'keterangan',this.value)" placeholder="opsional"></td>
+            <td><input type="text" value="${escHtml(b.keterangan)}" oninput="jurnalPage.ubahBaris(${i},'keterangan',this.value)" placeholder="opsional"></td>
             <td><input type="number" min="0" step="any" value="${b.debit || ''}" oninput="jurnalPage.ubahBaris(${i},'debit',this.value)"></td>
             <td><input type="number" min="0" step="any" value="${b.kredit || ''}" oninput="jurnalPage.ubahBaris(${i},'kredit',this.value)"></td>
             <td><button type="button" class="catcart-cart-row-hapus" onclick="jurnalPage.hapusBaris(${i})">&times;</button></td>
@@ -101,6 +110,8 @@ const jurnalPage = {
         if (wrap) wrap.innerHTML = this.barisFormHtml();
     },
 
+    // Markup form dirakit manual (bodyHtml) karena butuh tabel baris
+    // dinamis — TETAP dibuka lewat web.openDrawer() seperti form lainnya.
     bukaForm() {
         this.resetBaris();
         web.openDrawer({
@@ -110,7 +121,7 @@ const jurnalPage = {
                     <div class="a-row"><label>Tanggal</label>
                         <input type="date" name="tanggal" value="${new Date().toISOString().slice(0, 10)}" required></div>
                     <div class="a-row"><label>Keterangan</label>
-                        <input type="text" name="keterangan" placeholder="mis. Setoran modal awal / Bayar listrik" required></div>
+                        <input type="text" name="keterangan" placeholder="mis. Setoran modal awal / Bayar listrik" required maxlength="200"></div>
                     <div id="jurnalBarisWrap">${this.barisFormHtml()}</div>
                     <button type="submit" class="slcBtn">Simpan Jurnal</button>
                 </form>`,
@@ -249,10 +260,10 @@ async function resolveJurnal(sub) {
             return {
                 Nomor: j.nomor,
                 Tanggal: j.tanggal,
-                Sumber: `<span class="badge ${sumberBadge[j.sumber] || ''}">${j.sumber}</span>`,
+                Sumber: `<span class="badge ${sumberBadge[j.sumber] || ''}">${escHtml(j.sumber)}</span>`,
                 Keterangan: j.keterangan || '-',
                 Jumlah: formatRupiah(total),
-                Aksi: `<button class="slcBtn" onclick="web.navigate('jurnal/detail-${j.id}')">Lihat</button>`,
+                Aksi: `<button class="slcBtn" onclick='web.navigate(${JSON.stringify('jurnal/detail-' + j.id)})'>Lihat</button>`,
             };
         });
 
@@ -267,6 +278,7 @@ async function resolveJurnal(sub) {
                  <button class="slcBtn" style="background:#555" onclick="web.navigate('laporan')">Laporan Keuangan</button>`,
                 `table:${JSON.stringify(tableRows)}`,
             ],
+            tableOpts: { rawKeys: ['Sumber', 'Aksi'] },
             emptyText: 'Belum ada jurnal. Jurnal akan muncul otomatis setelah ada transaksi jual/beli, atau bisa diinput manual.',
         },
     ];
@@ -289,8 +301,8 @@ async function resolveJurnalDetail(id) {
     }));
 
     return [
-        { section: 'titleHero', title: `Jurnal ${jurnal.nomor}`,
-          description: `Tanggal: <strong>${jurnal.tanggal}</strong> &middot; Sumber: <strong>${jurnal.sumber}</strong>${jurnal.keterangan ? ` &middot; ${jurnal.keterangan}` : ''}` },
+        { section: 'titleHero', title: `Jurnal ${escHtml(jurnal.nomor)}`,
+          description: `Tanggal: <strong>${escHtml(jurnal.tanggal)}</strong> &middot; Sumber: <strong>${escHtml(jurnal.sumber)}</strong>${jurnal.keterangan ? ` &middot; ${escHtml(jurnal.keterangan)}` : ''}` },
         {
             section: 'articleFull',
             subtitle: `Baris Jurnal (${baris.length})`,

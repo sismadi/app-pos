@@ -9,6 +9,11 @@
 // transaksi, distribusi), bukan cuma katalognya doang yang di-share.
 // Kalau metode QRIS, langsung dibuat 1 baris di tabel `payment`
 // (lihat qrisPage.buatPembayaran).
+// [SECURITY] lihat catatan rawKeys/JSON.stringify di produk.js. Nama
+// lokasi/kontak & nomor transaksi yang tampil di deskripsi halaman
+// detail (bukan tabel) di-escHtml() satu per satu karena
+// titleHero.description dirender sebagai HTML mentah (sengaja, supaya
+// tag <strong> tetap berfungsi).
 // ============================================================
 web.routes.transaksi = 'resolveTransaksi';
 
@@ -129,8 +134,8 @@ async function resolveTransaksi(sub) {
             Lokasi: lokasiById[t.lokasiId]?.nama || '-',
             Kontak: kontakById[t.kontakId]?.nama || '-',
             Total: formatRupiah(t.totalBayar),
-            Status: `<span class="badge ${statusBadge[t.status] || ''}">${t.status}</span>`,
-            Aksi: `<button class="slcBtn" onclick="web.navigate('transaksi/detail-${t.id}')">Lihat</button>`,
+            Status: `<span class="badge ${escHtml(statusBadge[t.status] || '')}">${escHtml(t.status)}</span>`,
+            Aksi: `<button class="slcBtn" onclick='web.navigate(${JSON.stringify('transaksi/detail-' + t.id)})'>Lihat</button>`,
         }));
 
     return [
@@ -143,6 +148,7 @@ async function resolveTransaksi(sub) {
                  <button class="slcBtn" style="background:#555" onclick="web.navigate('transaksi/beli')">+ Transaksi Beli</button>`,
                 `table:${JSON.stringify(tableRows)}`,
             ],
+            tableOpts: { rawKeys: ['Tipe', 'Status', 'Aksi'] },
             emptyText: 'Belum ada transaksi.',
         },
     ];
@@ -175,20 +181,20 @@ async function resolveTransaksiDetail(id) {
         `card:Jumlah:${formatRupiah(pay.jumlah)}`,
         `card:Referensi:${pay.referensi}`,
         pay.status === 'pending'
-            ? `<div class="info-card"><strong>Kode QRIS (Demo)</strong><p style="word-break:break-all">${pay.qrString}</p>
-               <button class="slcBtn" onclick="qrisPage.tandaiLunas('${pay.id}','${id}')">Tandai Lunas (Simulasi)</button></div>`
+            ? `<div class="info-card"><strong>Kode QRIS (Demo)</strong><p style="word-break:break-all">${escHtml(pay.qrString)}</p>
+               <button class="slcBtn" onclick='qrisPage.tandaiLunas(${JSON.stringify(pay.id)},${JSON.stringify(id)})'>Tandai Lunas (Simulasi)</button></div>`
             : '',
     ] : [];
 
     return [
-        { section: 'titleHero', title: `Transaksi ${trx.tipe === 'jual' ? 'Jual' : 'Beli'} — ${trx.nomor}`,
-          description: `Lokasi: <strong>${lokasi?.nama || '-'}</strong> &middot; Kontak: <strong>${kontak?.nama || '-'}</strong> &middot; Status: <strong>${trx.status}</strong> &middot; Metode: <strong>${trx.metodePembayaran.toUpperCase()}</strong>` },
+        { section: 'titleHero', title: `Transaksi ${trx.tipe === 'jual' ? 'Jual' : 'Beli'} — ${escHtml(trx.nomor)}`,
+          description: `Lokasi: <strong>${escHtml(lokasi?.nama || '-')}</strong> &middot; Kontak: <strong>${escHtml(kontak?.nama || '-')}</strong> &middot; Status: <strong>${escHtml(trx.status)}</strong> &middot; Metode: <strong>${escHtml(trx.metodePembayaran.toUpperCase())}</strong>` },
         {
             section: 'articleFull',
             subtitle: `Baris Produk (${baris.length}) — Total: ${formatRupiah(trx.totalBayar)}`,
             lines: [
                 `<button class="slcBtn" style="background:#555" onclick="web.navigate('transaksi')">&larr; Kembali</button>
-                 <button class="slcBtn" style="background:#c0392b" onclick="transaksiPage.hapus('${id}')">Hapus</button>`,
+                 <button class="slcBtn" style="background:#c0392b" onclick='transaksiPage.hapus(${JSON.stringify(id)})'>Hapus</button>`,
                 `table:${JSON.stringify(tableRows)}`,
                 ...paymentBlock,
             ],

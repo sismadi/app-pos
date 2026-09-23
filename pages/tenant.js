@@ -2,6 +2,15 @@
 // pages/tenant.js — Kelola daftar tenant (toko), khusus superadmin.
 // Tabel `tenants` TIDAK di-scope (lihat db.js: allTenants/insertTenant/
 // updateTenant lewat jalur khusus, bukan db.all/db.insert biasa).
+//
+// [SECURITY] db.insertTenant() sekarang SATU panggilan ke
+// POST /api?table=tenants — backend (handleTenantsTable di worker.js)
+// yang membuat baris tenants + users (password di-hash PBKDF2 di sana)
+// + lokasi "Toko Utama" sekaligus, dan menolak permintaan ini kalau
+// sesi yang memanggil bukan superadmin. Versi lama merakit 3 panggilan
+// terpisah (insertTenant lalu insertForTenant('users', ...) dengan
+// PASSWORD PLAINTEXT di body) dari klien — itu sama saja mengetik
+// password pengguna baru dalam bentuk polos lewat jaringan.
 // ============================================================
 web.routes.tenant = 'resolveTenant';
 
@@ -11,12 +20,12 @@ const tenantPage = {
             title: 'Tambah Tenant Baru',
             fields: [
                 { type: 'text', name: 'kodeToko', label: 'Kode Toko', required: true },
-                { type: 'text', name: 'nama', label: 'Nama Toko', required: true },
-                { type: 'text', name: 'alamat', label: 'Alamat' },
-                { type: 'text', name: 'telepon', label: 'Telepon' },
+                { type: 'text', name: 'nama', label: 'Nama Toko', required: true, maxlength: 80 },
+                { type: 'text', name: 'alamat', label: 'Alamat', maxlength: 200 },
+                { type: 'text', name: 'telepon', label: 'Telepon', maxlength: 30 },
                 { type: 'text', name: 'ownerUsername', label: 'Username Pemilik', required: true },
-                { type: 'text', name: 'ownerPassword', label: 'Password Pemilik', required: true },
-                { type: 'text', name: 'ownerName', label: 'Nama Pemilik', required: true },
+                { type: 'password', name: 'ownerPassword', label: 'Password Pemilik (min. 8 karakter)', required: true, autocomplete: 'new-password' },
+                { type: 'text', name: 'ownerName', label: 'Nama Pemilik', required: true, maxlength: 80 },
             ],
             submitText: 'Buat Tenant',
             onSubmit: 'event.preventDefault(); tenantPage.simpanBaru(this);',
@@ -25,25 +34,21 @@ const tenantPage = {
 
     async simpanBaru(form) {
         const val = (n) => form.querySelector(`[name="${n}"]`)?.value.trim();
-        const kodeToko = val('kodeToko').toUpperCase();
-        if (!kodeToko || !val('nama') || !val('ownerUsername') || !val('ownerPassword')) return alert('Field bertanda * wajib diisi.');
-        if (kodeToko === auth.SUPERADMIN_KODE) return alert('Kode Toko tersebut tidak dapat dipakai.');
+        const payload = {
+            kodeToko: val('kodeToko').toUpperCase(),
+            nama: val('nama'),
+            alamat: val('alamat'),
+            telepon: val('telepon'),
+            ownerUsername: val('ownerUsername'),
+            ownerPassword: form.querySelector('[name="ownerPassword"]').value,
+            ownerName: val('ownerName'),
+        };
+        if (!payload.kodeToko || !payload.nama || !payload.ownerUsername || !payload.ownerPassword || !payload.ownerName) {
+            return alert('Field bertanda * wajib diisi.');
+        }
 
         try {
-            const tenants = await db.allTenants();
-            if (tenants.some(t => t.kodeToko.toUpperCase() === kodeToko)) return alert('Kode Toko sudah dipakai.');
-
-            const tenant = await db.insertTenant({
-                kodeToko, nama: val('nama'), alamat: val('alamat'), telepon: val('telepon'),
-                status: 'aktif', createdAt: new Date().toISOString(),
-            });
-            await db.insertForTenant('users', tenant.id, {
-                username: val('ownerUsername'), password: val('ownerPassword'), name: val('ownerName'),
-                role: 'owner', createdAt: new Date().toISOString(),
-            });
-            await db.insertForTenant('lokasi', tenant.id, {
-                nama: 'Toko Utama', tipe: 'toko', alamat: val('alamat') || '', createdAt: new Date().toISOString(),
-            });
+            await db.insertTenant(payload);
         } catch (err) { return alert('Gagal membuat tenant: ' + err.message); }
 
         web.closeDrawer();
@@ -69,8 +74,8 @@ async function resolveTenant() {
         Telepon: t.telepon || '-',
         Status: t.status === 'aktif' ? '<span class="badge badge-success">Aktif</span>' : '<span class="badge badge-muted">Nonaktif</span>',
         Aksi: t.status === 'aktif'
-            ? `<button class="slcBtn" style="background:#c0392b" onclick="tenantPage.toggleStatus('${t.id}','nonaktif')">Nonaktifkan</button>`
-            : `<button class="slcBtn" style="background:#1e824c" onclick="tenantPage.toggleStatus('${t.id}','aktif')">Aktifkan</button>`,
+            ? `<button class="slcBtn" style="background:#c0392b" onclick='tenantPage.toggleStatus(${JSON.stringify(t.id)},"nonaktif")'>Nonaktifkan</button>`
+            : `<button class="slcBtn" style="background:#1e824c" onclick='tenantPage.toggleStatus(${JSON.stringify(t.id)},"aktif")'>Aktifkan</button>`,
     }));
 
     return [
@@ -82,6 +87,7 @@ async function resolveTenant() {
                 '<button class="slcBtn" onclick="tenantPage.bukaTambah()">+ Tambah Tenant</button>',
                 `table:${JSON.stringify(tableRows)}`,
             ],
+            tableOpts: { rawKeys: ['Status', 'Aksi'] },
             emptyText: 'Belum ada tenant terdaftar selain akun superadmin.',
         },
     ];

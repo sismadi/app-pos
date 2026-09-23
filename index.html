@@ -5,10 +5,21 @@
     <meta name="description" content="Aplikasi POS (Point of Sale) multi-tenant: kelola produk, lokasi/gudang, distribusi stok, transaksi jual-beli, kontak, dan pembayaran QRIS untuk banyak toko dalam satu aplikasi.">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
     <title>POS Piawai</title>
+    <!-- [PERF] Preconnect ke origin API (dipisah dari frontend, lihat db.js) —
+         browser membuka koneksi DNS+TLS lebih awal, jadi fetch data halaman
+         pertama tidak menunggu handshake baru saat itu juga. -->
+    <link rel="preconnect" href="https://pos-api.sismadi.workers.dev">
+    <link rel="dns-prefetch" href="https://pos-api.sismadi.workers.dev">
     <link rel="stylesheet" type="text/css" href="style.css">
     <link rel="stylesheet" type="text/css" href="svg.css">
+    <!-- [SECURITY] Captcha login/registrasi adalah captcha matematika kustom
+         (soal diminta ke server, diverifikasi di server juga) — tidak ada
+         script pihak ketiga yang perlu dimuat di sini. Lihat auth.js. -->
 </head>
 <body>
+
+  <!-- [PERF] Progress bar navigasi tipis — lihat web.startProgress/finishProgress di engine.js -->
+  <div id="navProgress"></div>
 
   <div class="main" id="body">
     <div id="stickyHeaderWrap">
@@ -35,7 +46,7 @@
 <div id="content"></div>
 
 <!-- FORM DRAWER — panel geser dari kanan, dipakai ulang oleh SEMUA form
-     tambah/edit (produk, kontak, lokasi, distribusi, transaksi, tenant). -->
+     tambah/edit (produk, kontak, lokasi, distribusi, transaksi, tenant, jurnal). -->
 <div id="formDrawerOverlay" class="form-drawer-overlay" onclick="web.closeDrawer()"></div>
 <div id="formDrawerPanel" class="form-drawer" role="dialog" aria-modal="true" aria-labelledby="formDrawerTitle">
     <div class="form-drawer-header">
@@ -98,8 +109,13 @@ function renderMenu() {
 
 <script src="dataset.js"></script>
 <script>
+    // [PERF] Render pertama dipicu langsung setelah SEMUA skrip halaman
+    // siap (loadPageScripts sekarang memuatnya paralel, lihat dataset.js),
+    // BUKAN menunggu event 'load' penuh (yang baru selesai setelah semua
+    // gambar/aset lain ikut termuat) — lihat catatan di engine.js.
     loadPageScripts(pageFiles, () => {
         renderMenu();
+        web.navigate();
     });
 </script>
 

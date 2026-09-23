@@ -1717,3 +1717,28 @@ body.drawer-lock { overflow: hidden; }
   .catcart-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
   .catcart-fab { left: 16px; right: 16px; justify-content: space-between; }
 }
+
+/* ============================================================
+   [PERF] Navigasi SPA — progress bar tipis + fade konten
+   (lihat web.startProgress/finishProgress & ui.render di engine.js)
+   ============================================================ */
+#navProgress {
+  position: fixed;
+  top: 0; left: 0;
+  height: 3px;
+  width: 0%;
+  background: var(--aColor, #DF8C43);
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  transition: width .25s ease, opacity .2s ease;
+}
+#navProgress.active { opacity: 1; }
+#navProgress.done    { opacity: 0; transition: width .2s ease, opacity .3s ease .1s; }
+
+#content {
+  transition: opacity .12s ease;
+}
+#content.content-fade-out {
+  opacity: 0.4;
+}

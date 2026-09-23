@@ -2,6 +2,7 @@
 // pages/lokasi.js — CRUD lokasi (toko/gudang) + kelola stok per lokasi
 // (tabel lokasi_produk). Pola CRUD lokasi identik dengan produk.js/kontak.js;
 // bagian tambahan di sini adalah panel "Stok di Lokasi Ini".
+// [SECURITY] lihat catatan rawKeys/JSON.stringify di produk.js.
 // ============================================================
 web.routes.lokasi = 'resolveLokasi';
 
@@ -9,10 +10,10 @@ const lokasiPage = {
     fields(l = {}) {
         return [
             { type: 'hidden', name: 'id', value: l.id || '' },
-            { type: 'text',   name: 'nama', label: 'Nama Lokasi', value: l.nama || '', required: true },
+            { type: 'text',   name: 'nama', label: 'Nama Lokasi', value: l.nama || '', required: true, maxlength: 120 },
             { type: 'select', name: 'tipe', label: 'Tipe', value: l.tipe || 'toko',
               options: [{ value: 'toko', label: 'Toko' }, { value: 'gudang', label: 'Gudang' }], required: true },
-            { type: 'textarea', name: 'alamat', label: 'Alamat', value: l.alamat || '' },
+            { type: 'textarea', name: 'alamat', label: 'Alamat', value: l.alamat || '', maxlength: 200 },
         ];
     },
 
@@ -107,9 +108,9 @@ async function resolveLokasi(sub) {
         Nama: l.nama,
         Tipe: `<span class="badge">${l.tipe === 'toko' ? 'Toko' : 'Gudang'}</span>`,
         Alamat: l.alamat || '-',
-        Aksi: `<button class="slcBtn" onclick="web.navigate('lokasi/detail-${l.id}')">Lihat Stok</button>
-               <button class="slcBtn" onclick="lokasiPage.bukaEdit('${l.id}')">Edit</button>
-               <button class="slcBtn" style="background:#c0392b" onclick="lokasiPage.hapus('${l.id}')">Hapus</button>`,
+        Aksi: `<button class="slcBtn" onclick='web.navigate(${JSON.stringify('lokasi/detail-' + l.id)})'>Lihat Stok</button>
+               <button class="slcBtn" onclick='lokasiPage.bukaEdit(${JSON.stringify(l.id)})'>Edit</button>
+               <button class="slcBtn" style="background:#c0392b" onclick='lokasiPage.hapus(${JSON.stringify(l.id)})'>Hapus</button>`,
     }));
 
     return [
@@ -121,6 +122,7 @@ async function resolveLokasi(sub) {
                 '<button class="slcBtn" onclick="lokasiPage.bukaTambah()">+ Tambah Lokasi</button>',
                 `table:${JSON.stringify(tableRows)}`,
             ],
+            tableOpts: { rawKeys: ['Tipe', 'Aksi'] },
             emptyText: 'Belum ada lokasi. Klik "+ Tambah Lokasi" untuk mulai.',
         },
     ];
@@ -141,23 +143,24 @@ async function resolveLokasiDetail(lokasiId) {
         const rendah = s.stok <= (s.stokMinimum || 0);
         return {
             Produk: p.nama || '(produk terhapus)',
-            Stok: rendah ? `<strong style="color:#c0392b">${s.stok}</strong>` : s.stok,
+            Stok: rendah ? `<strong style="color:#c0392b">${escHtml(String(s.stok))}</strong>` : s.stok,
             'Stok Minimum': s.stokMinimum ?? 0,
             Satuan: p.satuan || '-',
-            Aksi: `<button class="slcBtn" style="background:#c0392b" onclick="lokasiPage.hapusStok('${s.id}','${lokasiId}')">Hapus</button>`,
+            Aksi: `<button class="slcBtn" style="background:#c0392b" onclick='lokasiPage.hapusStok(${JSON.stringify(s.id)},${JSON.stringify(lokasiId)})'>Hapus</button>`,
         };
     });
 
     return [
-        { section: 'titleHero', title: `Stok — ${lokasi.nama}`, description: `Tipe: ${lokasi.tipe === 'toko' ? 'Toko' : 'Gudang'}` },
+        { section: 'titleHero', title: `Stok — ${escHtml(lokasi.nama)}`, description: `Tipe: <strong>${lokasi.tipe === 'toko' ? 'Toko' : 'Gudang'}</strong>` },
         {
             section: 'articleFull',
             subtitle: `Stok Produk di Lokasi Ini (${stokRows.length})`,
             lines: [
-                `<button class="slcBtn" onclick="lokasiPage.bukaAturStok('${lokasiId}')">+ Atur Stok Produk</button>
+                `<button class="slcBtn" onclick='lokasiPage.bukaAturStok(${JSON.stringify(lokasiId)})'>+ Atur Stok Produk</button>
                  <button class="slcBtn" style="background:#555" onclick="web.navigate('lokasi')">&larr; Kembali ke Daftar Lokasi</button>`,
                 `table:${JSON.stringify(tableRows)}`,
             ],
+            tableOpts: { rawKeys: ['Stok', 'Aksi'] },
             emptyText: 'Belum ada stok tercatat di lokasi ini.',
         },
     ];

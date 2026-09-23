@@ -2,6 +2,13 @@
 // pages/produk.js — CRUD master produk. Pola di file ini (list + drawer
 // tambah/edit + hapus) dipakai ULANG oleh kontak.js, lokasi.js, dst.
 // dengan bentuk yang sama, hanya field & tabelnya yang berbeda.
+//
+// [SECURITY] tableOpts.rawKeys menandai kolom yang SENGAJA berisi HTML
+// mentah (badge Status, tombol Aksi) — kolom lain (Kode/Nama/Kategori/
+// Satuan, semuanya bisa diisi bebas oleh pengguna) di-escape OTOMATIS
+// oleh renderTable() (lihat engine.js). Id di onclick dikirim lewat
+// JSON.stringify(), bukan interpolasi manual, supaya id yang (secara
+// teori) mengandung tanda kutip tidak bisa memutus atribut onclick.
 // ============================================================
 web.routes.produk = 'resolveProduk';
 
@@ -9,9 +16,9 @@ const produkPage = {
     fields(p = {}) {
         return [
             { type: 'hidden', name: 'id', value: p.id || '' },
-            { type: 'text',   name: 'kode',      label: 'Kode',       value: p.kode || '' },
-            { type: 'text',   name: 'nama',      label: 'Nama Produk', value: p.nama || '', required: true },
-            { type: 'text',   name: 'kategori',  label: 'Kategori',   value: p.kategori || '' },
+            { type: 'text',   name: 'kode',      label: 'Kode',       value: p.kode || '', maxlength: 40 },
+            { type: 'text',   name: 'nama',      label: 'Nama Produk', value: p.nama || '', required: true, maxlength: 120 },
+            { type: 'text',   name: 'kategori',  label: 'Kategori',   value: p.kategori || '', maxlength: 60 },
             { type: 'select', name: 'satuan',    label: 'Satuan',     value: p.satuan || 'pcs',
               options: ['pcs', 'kg', 'gram', 'liter', 'botol', 'karung', 'dus', 'pak'] },
             { type: 'number', name: 'hargaBeli', label: 'Harga Beli', value: p.hargaBeli ?? 0 },
@@ -80,8 +87,8 @@ async function resolveProduk() {
         'Harga Beli': formatRupiah(p.hargaBeli),
         'Harga Jual': formatRupiah(p.hargaJual),
         Status: p.aktif ? '<span class="badge">Aktif</span>' : '<span class="badge badge-muted">Nonaktif</span>',
-        Aksi: `<button class="slcBtn" onclick="produkPage.bukaEdit('${p.id}')">Edit</button>
-               <button class="slcBtn" style="background:#c0392b" onclick="produkPage.hapus('${p.id}')">Hapus</button>`,
+        Aksi: `<button class="slcBtn" onclick='produkPage.bukaEdit(${JSON.stringify(p.id)})'>Edit</button>
+               <button class="slcBtn" style="background:#c0392b" onclick='produkPage.hapus(${JSON.stringify(p.id)})'>Hapus</button>`,
     }));
 
     return [
@@ -93,6 +100,7 @@ async function resolveProduk() {
                 '<button class="slcBtn" onclick="produkPage.bukaTambah()">+ Tambah Produk</button>',
                 `table:${JSON.stringify(tableRows)}`,
             ],
+            tableOpts: { rawKeys: ['Status', 'Aksi'] },
             emptyText: 'Belum ada produk. Klik "+ Tambah Produk" untuk mulai.',
         },
     ];

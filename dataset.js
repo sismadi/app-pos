@@ -58,7 +58,7 @@ const siteConfig = [
 // mengambil data langsung dari db.js tiap kali dibuka (lihat pages/*.js).
 const pages = {};
 
-// Daftar file JS halaman yang dimuat berurutan sebelum menu dirender.
+// Daftar file JS halaman yang dimuat sebelum menu dirender.
 const pageFiles = [
     'pages/shared.js',
     'pages/home.js',
@@ -75,14 +75,23 @@ const pageFiles = [
     'pages/dashboard.js',
 ];
 
+// [PERF] Dulu file-file ini dimuat BERURUTAN (satu <script> baru
+// disisipkan setelah yang sebelumnya selesai onload) — waktu tunggu
+// total = jumlah SEMUA file. Beberapa halaman (mis. distribusi.js/
+// transaksi.js) saling bergantung pada `createInstantDocumentPage` dari
+// shared.js, tapi TIDAK pada urutan satu sama lain — jadi cukup
+// pastikan shared.js dimuat lebih dulu (lihat urutan pageFiles di atas),
+// sisanya boleh paralel. Promise.all mengubah waktu tunggu jadi = waktu
+// file TERLAMA saja, bukan jumlah semuanya.
 function loadPageScripts(files, done) {
-    let i = 0;
-    (function next() {
-        if (i >= files.length) { done(); return; }
+    const [first, ...rest] = files;
+    const loadOne = (src) => new Promise((resolve) => {
         const s = document.createElement('script');
-        s.src = files[i++];
-        s.onload = next;
-        s.onerror = next; // tetap lanjut walau 1 file gagal, supaya halaman lain tidak ikut macet
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = resolve; // tetap lanjut walau 1 file gagal, supaya halaman lain tidak ikut macet
         document.body.appendChild(s);
-    })();
+    });
+
+    loadOne(first).then(() => Promise.all(rest.map(loadOne))).then(done);
 }

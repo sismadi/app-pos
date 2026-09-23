@@ -2,6 +2,12 @@
 // pages/dashboard.js — Ringkasan KPI + produk terlaris (statGrid + barChart,
 // lihat engine.js). Superadmin diarahkan ke halaman Kelola Tenant, bukan
 // dashboard toko (karena superadmin tidak memiliki data transaksi sendiri).
+// [SECURITY] user.name & user.tenantNama BISA berasal dari input pengguna
+// (diisi saat registrasi mandiri, lihat auth.js) — WAJIB escHtml() di sini
+// karena titleHero.description dirender sebagai HTML mentah (sengaja,
+// supaya tag <strong> tetap berfungsi). Item barChart (nama produk
+// terlaris) sudah di-escape secara terpusat di dalam komponennya sendiri
+// (lihat components.barChart di engine.js), tidak perlu diulang di sini.
 // ============================================================
 web.routes.dashboard = 'resolveDashboard';
 
@@ -47,7 +53,7 @@ async function resolveDashboard() {
     }
 
     return [
-        { section: 'titleHero', title: 'Dashboard', description: `Selamat datang kembali, <strong>${user.name}</strong> &mdash; ${user.tenantNama}.` },
+        { section: 'titleHero', title: 'Dashboard', description: `Selamat datang kembali, <strong>${escHtml(user.name)}</strong> &mdash; ${escHtml(user.tenantNama)}.` },
         {
             section: 'statGrid',
             stats: [

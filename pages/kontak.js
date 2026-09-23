@@ -1,6 +1,7 @@
 // ============================================================
 // pages/kontak.js — CRUD kontak (distributor/supplier/customer/lainnya).
 // Pola SAMA PERSIS dengan produk.js, lebih sederhana (field lebih sedikit).
+// [SECURITY] lihat catatan rawKeys/JSON.stringify di produk.js.
 // ============================================================
 web.routes.kontak = 'resolveKontak';
 
@@ -15,11 +16,11 @@ const kontakPage = {
     fields(k = {}) {
         return [
             { type: 'hidden', name: 'id', value: k.id || '' },
-            { type: 'text',   name: 'nama',    label: 'Nama',   value: k.nama || '', required: true },
+            { type: 'text',   name: 'nama',    label: 'Nama',   value: k.nama || '', required: true, maxlength: 120 },
             { type: 'select', name: 'tipe',    label: 'Tipe',   value: k.tipe || 'customer', options: TIPE_KONTAK, required: true },
-            { type: 'text',   name: 'telepon', label: 'Telepon', value: k.telepon || '' },
-            { type: 'text',   name: 'email',   label: 'Email',  value: k.email || '' },
-            { type: 'textarea', name: 'alamat', label: 'Alamat', value: k.alamat || '' },
+            { type: 'text',   name: 'telepon', label: 'Telepon', value: k.telepon || '', maxlength: 30 },
+            { type: 'text',   name: 'email',   label: 'Email',  value: k.email || '', maxlength: 120 },
+            { type: 'textarea', name: 'alamat', label: 'Alamat', value: k.alamat || '', maxlength: 200 },
         ];
     },
 
@@ -75,12 +76,12 @@ async function resolveKontak() {
     const rows = await db.query('kontak', () => true);
     const tableRows = rows.map(k => ({
         Nama: k.nama,
-        Tipe: `<span class="badge">${tipeKontakLabel(k.tipe)}</span>`,
+        Tipe: `<span class="badge">${escHtml(tipeKontakLabel(k.tipe))}</span>`,
         Telepon: k.telepon || '-',
         Email: k.email || '-',
         Alamat: k.alamat || '-',
-        Aksi: `<button class="slcBtn" onclick="kontakPage.bukaEdit('${k.id}')">Edit</button>
-               <button class="slcBtn" style="background:#c0392b" onclick="kontakPage.hapus('${k.id}')">Hapus</button>`,
+        Aksi: `<button class="slcBtn" onclick='kontakPage.bukaEdit(${JSON.stringify(k.id)})'>Edit</button>
+               <button class="slcBtn" style="background:#c0392b" onclick='kontakPage.hapus(${JSON.stringify(k.id)})'>Hapus</button>`,
     }));
 
     return [
@@ -92,6 +93,7 @@ async function resolveKontak() {
                 '<button class="slcBtn" onclick="kontakPage.bukaTambah()">+ Tambah Kontak</button>',
                 `table:${JSON.stringify(tableRows)}`,
             ],
+            tableOpts: { rawKeys: ['Tipe', 'Aksi'] },
             emptyText: 'Belum ada kontak. Klik "+ Tambah Kontak" untuk mulai.',
         },
     ];

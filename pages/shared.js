@@ -76,9 +76,9 @@ function createCatalogCart(name, cfg) {
         },
 
         chipsHtml() {
-            const semua = `<button type="button" class="catcart-chip ${!this.kategoriAktif ? 'active' : ''}" onclick="${this._name}.pilihKategori('')">Semua</button>`;
+            const semua = `<button type="button" class="catcart-chip ${!this.kategoriAktif ? 'active' : ''}" onclick='${this._name}.pilihKategori("")'>Semua</button>`;
             return semua + this.kategoriList().map(k =>
-                `<button type="button" class="catcart-chip ${this.kategoriAktif === k ? 'active' : ''}" onclick="${this._name}.pilihKategori('${k}')">${k}</button>`
+                `<button type="button" class="catcart-chip ${this.kategoriAktif === k ? 'active' : ''}" onclick='${this._name}.pilihKategori(${JSON.stringify(k)})'>${escHtml(k)}</button>`
             ).join('');
         },
 
@@ -89,10 +89,10 @@ function createCatalogCart(name, cfg) {
                 const line = this.cart.find(c => c.produkId === p.id);
                 const stok = this._cfg.getStock ? this._cfg.getStock(p) : null;
                 return `
-                <button type="button" class="catcart-product-card" onclick="${this._name}.tambah('${p.id}')">
+                <button type="button" class="catcart-product-card" onclick='${this._name}.tambah(${JSON.stringify(p.id)})'>
                     ${line ? `<span class="catcart-qty-badge">${line.qty}</span>` : ''}
-                    <span class="catcart-product-nama">${p.nama}</span>
-                    <span class="catcart-product-kategori">${p.kategori || '&nbsp;'}${stok !== null ? ` &middot; stok ${stok}` : ''}</span>
+                    <span class="catcart-product-nama">${escHtml(p.nama)}</span>
+                    <span class="catcart-product-kategori">${escHtml(p.kategori || '') || '&nbsp;'}${stok !== null ? ` &middot; stok ${escHtml(String(stok))}` : ''}</span>
                     <span class="catcart-product-harga">${formatRupiah(this._cfg.getPrice(p))}</span>
                 </button>`;
             }).join('')}</div>`;
@@ -138,19 +138,19 @@ function createCatalogCart(name, cfg) {
             const rows = this.cart.map(c => `
                 <div class="catcart-cart-row">
                     <div class="catcart-cart-row-info">
-                        <strong>${c.nama}</strong>
+                        <strong>${escHtml(c.nama)}</strong>
                         <span>
                             ${this._cfg.allowPriceEdit
-                                ? `<input type="number" min="0" step="any" value="${c.harga}" class="catcart-harga-input" onchange="${this._name}.ubahHarga('${c.produkId}', this.value)">`
+                                ? `<input type="number" min="0" step="any" value="${escHtml(String(c.harga))}" class="catcart-harga-input" onchange='${this._name}.ubahHarga(${JSON.stringify(c.produkId)}, this.value)'>`
                                 : formatRupiah(c.harga)}
                             &times; ${c.qty} = ${formatRupiah(c.harga * c.qty)}
                         </span>
                     </div>
                     <div class="catcart-cart-row-qty">
-                        <button type="button" onclick="${this._name}.ubahQty('${c.produkId}', -1)">&minus;</button>
+                        <button type="button" onclick='${this._name}.ubahQty(${JSON.stringify(c.produkId)}, -1)'>&minus;</button>
                         <span>${c.qty}</span>
-                        <button type="button" onclick="${this._name}.ubahQty('${c.produkId}', 1)">+</button>
-                        <button type="button" class="catcart-cart-row-hapus" onclick="${this._name}.hapusDariKeranjang('${c.produkId}')">&times;</button>
+                        <button type="button" onclick='${this._name}.ubahQty(${JSON.stringify(c.produkId)}, 1)'>+</button>
+                        <button type="button" class="catcart-cart-row-hapus" onclick='${this._name}.hapusDariKeranjang(${JSON.stringify(c.produkId)})'>&times;</button>
                     </div>
                 </div>`).join('');
 
@@ -296,9 +296,9 @@ function createInstantDocumentPage(name, cfg) {
 
         headerBarHtml() {
             const lokasiOpt = this.lokasiList.map(l =>
-                `<option value="${l.id}" ${l.id === this.lokasiId ? 'selected' : ''}>${l.nama}</option>`).join('');
+                `<option value="${escHtml(l.id)}" ${l.id === this.lokasiId ? 'selected' : ''}>${escHtml(l.nama)}</option>`).join('');
             const kontakOpt = this.kontakList.map(k =>
-                `<option value="${k.id}" ${k.id === this.kontakId ? 'selected' : ''}>${k.nama}</option>`).join('');
+                `<option value="${escHtml(k.id)}" ${k.id === this.kontakId ? 'selected' : ''}>${escHtml(k.nama)}</option>`).join('');
             return `
                 <div class="catcart-header-bar">
                     <label>${cfg.lokasiLabel ? cfg.lokasiLabel(this.tipe) : 'Lokasi'}

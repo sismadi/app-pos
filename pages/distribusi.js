@@ -7,6 +7,10 @@
 // (masuk menambah, keluar mengurangi) sekali jalan, tanpa status draft
 // manual — meniru layar kasir sungguhan untuk KETIGA alur (kasir,
 // transaksi, distribusi), bukan cuma katalognya doang yang di-share.
+// [SECURITY] lihat catatan rawKeys/JSON.stringify di produk.js. Nama
+// lokasi/kontak yang tampil di deskripsi halaman detail (bukan tabel)
+// di-escHtml() satu per satu karena titleHero.description dirender
+// sebagai HTML mentah (sengaja, supaya tag <strong> tetap berfungsi).
 // ============================================================
 web.routes.distribusi = 'resolveDistribusi';
 
@@ -85,7 +89,7 @@ async function resolveDistribusi(sub) {
             Lokasi: lokasiById[d.lokasiId]?.nama || '-',
             Kontak: kontakById[d.kontakId]?.nama || '-',
             Status: d.status === 'selesai' ? '<span class="badge badge-success">Selesai</span>' : '<span class="badge badge-muted">Draft</span>',
-            Aksi: `<button class="slcBtn" onclick="web.navigate('distribusi/detail-${d.id}')">Lihat</button>`,
+            Aksi: `<button class="slcBtn" onclick='web.navigate(${JSON.stringify('distribusi/detail-' + d.id)})'>Lihat</button>`,
         }));
 
     return [
@@ -98,6 +102,7 @@ async function resolveDistribusi(sub) {
                  <button class="slcBtn" style="background:#555" onclick="web.navigate('distribusi/keluar')">+ Distribusi Keluar</button>`,
                 `table:${JSON.stringify(tableRows)}`,
             ],
+            tableOpts: { rawKeys: ['Tipe', 'Status', 'Aksi'] },
             emptyText: 'Belum ada dokumen distribusi.',
         },
     ];
@@ -123,14 +128,14 @@ async function resolveDistribusiDetail(id) {
     }));
 
     return [
-        { section: 'titleHero', title: `Distribusi ${dok.tipe === 'masuk' ? 'Masuk' : 'Keluar'} — ${dok.nomor}`,
-          description: `Lokasi: <strong>${lokasi?.nama || '-'}</strong> &middot; Kontak: <strong>${kontak?.nama || '-'}</strong> &middot; Status: <strong>${dok.status === 'selesai' ? 'Selesai' : 'Draft'}</strong>` },
+        { section: 'titleHero', title: `Distribusi ${dok.tipe === 'masuk' ? 'Masuk' : 'Keluar'} — ${escHtml(dok.nomor)}`,
+          description: `Lokasi: <strong>${escHtml(lokasi?.nama || '-')}</strong> &middot; Kontak: <strong>${escHtml(kontak?.nama || '-')}</strong> &middot; Status: <strong>${dok.status === 'selesai' ? 'Selesai' : 'Draft'}</strong>` },
         {
             section: 'articleFull',
             subtitle: `Baris Produk (${baris.length})`,
             lines: [
                 `<button class="slcBtn" style="background:#555" onclick="web.navigate('distribusi')">&larr; Kembali</button>
-                 <button class="slcBtn" style="background:#c0392b" onclick="distribusiPage.hapus('${id}')">Hapus</button>`,
+                 <button class="slcBtn" style="background:#c0392b" onclick='distribusiPage.hapus(${JSON.stringify(id)})'>Hapus</button>`,
                 `table:${JSON.stringify(tableRows)}`,
             ],
             emptyText: 'Belum ada baris produk pada dokumen ini.',

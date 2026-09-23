@@ -59,6 +59,47 @@ const transaksiPage = {
         try { await db.remove('transaksi', id); } catch (err) { return alert('Gagal menghapus: ' + err.message); }
         web.navigate('transaksi');
     },
+
+    // [ECOMMERCE] Pesanan dari etalase publik (toko.js) masuk sebagai
+    // transaksi tipe='jual', sumber='online', status='draft' — stok BELUM
+    // dipotong & jurnal BELUM diposting (lihat catatan di worker.js
+    // view=toko-pesan). Baru di sini, SETELAH staf toko meninjau pesanan,
+    // stok & jurnal diproses — sama seperti alur kasir/transaksi biasa
+    // (createInstantDocumentPage.simpan di shared.js), hanya saja
+    // dijalankan manual satu tombol alih-alih otomatis saat checkout.
+    async konfirmasiPesanan(id) {
+        const trx = await db.find('transaksi', t => t.id === id);
+        if (!trx) return alert('Transaksi tidak ditemukan.');
+        if (!confirm(`Konfirmasi pesanan online ${trx.nomor}? Stok akan dipotong & jurnal penjualan akan diposting.`)) return;
+        try {
+            const [baris, produkList] = await Promise.all([
+                db.query('transaksi_produk', b => b.transaksiId === trx.id),
+                db.query('produk', () => true),
+            ]);
+            for (const b of baris) {
+                const existing = await db.find('lokasi_produk', s => s.lokasiId === trx.lokasiId && s.produkId === b.produkId);
+                const stokBaru = (existing?.stok || 0) - b.qty;
+                if (existing) await db.update('lokasi_produk', existing.id, { stok: stokBaru });
+                else await db.insert('lokasi_produk', { lokasiId: trx.lokasiId, produkId: b.produkId, stok: stokBaru, stokMinimum: 0 });
+            }
+            await db.update('transaksi', trx.id, { status: 'selesai' });
+            const cart = baris.map(b => ({ produkId: b.produkId, qty: b.qty, harga: b.hargaSatuan }));
+            await jurnalPage.postingTransaksi({ ...trx, status: 'selesai' }, cart, { produkList });
+        } catch (err) { return alert('Gagal mengonfirmasi pesanan: ' + err.message); }
+        web.navigate(`transaksi/detail-${trx.id}`);
+    },
+
+    /** Tolak pesanan online (mis. stok sebenarnya habis) — TIDAK memotong
+     *  stok/memposting jurnal apa pun, cuma menandai batal supaya tidak
+     *  menumpuk di daftar "menunggu konfirmasi". */
+    async tolakPesanan(id) {
+        const trx = await db.find('transaksi', t => t.id === id);
+        if (!trx) return alert('Transaksi tidak ditemukan.');
+        if (!confirm(`Tolak pesanan online ${trx.nomor}? Pesanan akan ditandai batal.`)) return;
+        try { await db.update('transaksi', trx.id, { status: 'batal' }); }
+        catch (err) { return alert('Gagal menolak pesanan: ' + err.message); }
+        web.navigate(`transaksi/detail-${trx.id}`);
+    },
 };
 
 // --- Pembayaran QRIS ---------------------------------------------------
@@ -125,14 +166,16 @@ async function resolveTransaksi(sub) {
 
     const statusBadge = { draft: 'badge-muted', selesai: 'badge-success', batal: 'badge-warning' };
 
+    const pesananMasuk = rows.filter(t => t.sumber === 'online' && t.status === 'draft').length;
+
     const tableRows = rows
         .sort((a, b) => (b.tanggal || '').localeCompare(a.tanggal || ''))
         .map(t => ({
             Nomor: t.nomor,
-            Tipe: `<span class="badge ${t.tipe === 'jual' ? '' : 'badge-warning'}">${t.tipe === 'jual' ? 'Jual' : 'Beli'}</span>`,
+            Tipe: `<span class="badge ${t.tipe === 'jual' ? '' : 'badge-warning'}">${t.tipe === 'jual' ? 'Jual' : 'Beli'}</span>${t.sumber === 'online' ? ' <span class="badge badge-warning">Online</span>' : ''}`,
             Tanggal: t.tanggal,
             Lokasi: lokasiById[t.lokasiId]?.nama || '-',
-            Kontak: kontakById[t.kontakId]?.nama || '-',
+            Kontak: t.sumber === 'online' ? (t.pembeliNama || '-') : (kontakById[t.kontakId]?.nama || '-'),
             Total: formatRupiah(t.totalBayar),
             Status: `<span class="badge ${escHtml(statusBadge[t.status] || '')}">${escHtml(t.status)}</span>`,
             Aksi: `<button class="slcBtn" onclick='web.navigate(${JSON.stringify('transaksi/detail-' + t.id)})'>Lihat</button>`,
@@ -146,6 +189,7 @@ async function resolveTransaksi(sub) {
             lines: [
                 `<button class="slcBtn" onclick="web.navigate('transaksi/jual')">+ Transaksi Jual</button>
                  <button class="slcBtn" style="background:#555" onclick="web.navigate('transaksi/beli')">+ Transaksi Beli</button>`,
+                pesananMasuk > 0 ? `<div class="info-card"><strong>${pesananMasuk} pesanan online menunggu konfirmasi.</strong><p>Buka detail transaksi berstatus "draft" bertanda Online di bawah untuk mengonfirmasi atau menolaknya.</p></div>` : '',
                 `table:${JSON.stringify(tableRows)}`,
             ],
             tableOpts: { rawKeys: ['Tipe', 'Status', 'Aksi'] },
@@ -186,15 +230,32 @@ async function resolveTransaksiDetail(id) {
             : '',
     ] : [];
 
+    const isOnline = trx.sumber === 'online';
+    const menungguKonfirmasi = isOnline && trx.status === 'draft';
+
+    const pesananOnlineBlock = isOnline ? [
+        '## Data Pemesan (Online)',
+        `card:Nama:${trx.pembeliNama || '-'}`,
+        `card:Telepon/WA:${trx.pembeliTelepon || '-'}`,
+        trx.pembeliAlamat ? `card:Alamat/Catatan:${trx.pembeliAlamat}` : '',
+        menungguKonfirmasi
+            ? `<div class="info-card"><strong>Menunggu Konfirmasi</strong><p>Pesanan ini masuk dari etalase online dan BELUM memotong stok/jurnal. Hubungi pembeli lewat telepon/WA di atas untuk memastikan pesanan & pengiriman, lalu konfirmasi atau tolak di bawah.</p>
+                <button class="slcBtn" onclick='transaksiPage.konfirmasiPesanan(${JSON.stringify(trx.id)})'>&#10003; Konfirmasi Pesanan</button>
+                <button class="slcBtn" style="background:#c0392b" onclick='transaksiPage.tolakPesanan(${JSON.stringify(trx.id)})'>&times; Tolak Pesanan</button>
+               </div>`
+            : '',
+    ] : [];
+
     return [
-        { section: 'titleHero', title: `Transaksi ${trx.tipe === 'jual' ? 'Jual' : 'Beli'} — ${escHtml(trx.nomor)}`,
-          description: `Lokasi: <strong>${escHtml(lokasi?.nama || '-')}</strong> &middot; Kontak: <strong>${escHtml(kontak?.nama || '-')}</strong> &middot; Status: <strong>${escHtml(trx.status)}</strong> &middot; Metode: <strong>${escHtml(trx.metodePembayaran.toUpperCase())}</strong>` },
+        { section: 'titleHero', title: `Transaksi ${trx.tipe === 'jual' ? 'Jual' : 'Beli'} — ${escHtml(trx.nomor)}${isOnline ? ' <span class="badge badge-warning">Online</span>' : ''}`,
+          description: `Lokasi: <strong>${escHtml(lokasi?.nama || '-')}</strong> &middot; Kontak: <strong>${escHtml(isOnline ? (trx.pembeliNama || '-') : (kontak?.nama || '-'))}</strong> &middot; Status: <strong>${escHtml(trx.status)}</strong> &middot; Metode: <strong>${escHtml(trx.metodePembayaran.toUpperCase())}</strong>` },
         {
             section: 'articleFull',
             subtitle: `Baris Produk (${baris.length}) — Total: ${formatRupiah(trx.totalBayar)}`,
             lines: [
                 `<button class="slcBtn" style="background:#555" onclick="web.navigate('transaksi')">&larr; Kembali</button>
-                 <button class="slcBtn" style="background:#c0392b" onclick='transaksiPage.hapus(${JSON.stringify(id)})'>Hapus</button>`,
+                 ${menungguKonfirmasi ? '' : `<button class="slcBtn" style="background:#c0392b" onclick='transaksiPage.hapus(${JSON.stringify(id)})'>Hapus</button>`}`,
+                ...pesananOnlineBlock,
                 `table:${JSON.stringify(tableRows)}`,
                 ...paymentBlock,
             ],

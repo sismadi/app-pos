@@ -21,13 +21,18 @@
 // ============================================================
 const siteConfig = [
     { slug: 'home',        label: 'Beranda',  menu: true },
+    // [ECOMMERCE] Etalase belanja publik (?toko dan ?toko/<slug-toko>) —
+    // tanpa guestOnly/role supaya tetap terlihat untuk semua orang,
+    // baik pengunjung umum maupun staf yang sedang login. Lihat toko.js.
+    { slug: 'toko',        label: 'Belanja',  menu: true },
     { slug: 'dashboard',   label: 'Dashboard', menu: true, role: ['owner', 'kasir', 'gudang'] },
     {
         label: 'Penjualan',
         menu: true,
         children: [
-            { slug: 'kasir',     label: 'Kasir',     role: ['owner', 'kasir'] },
-            { slug: 'transaksi', label: 'Transaksi', role: ['owner', 'kasir'] },
+            { slug: 'kasir',       label: 'Kasir',       role: ['owner', 'kasir'] },
+            { slug: 'transaksi',   label: 'Transaksi',   role: ['owner', 'kasir'] },
+            { slug: 'toko-online', label: 'Toko Online', role: ['owner'] },
         ],
     },
     {
@@ -68,6 +73,8 @@ const pageFiles = [
     'pages/distribusi.js',
     'pages/transaksi.js',
     'pages/kasir.js',
+    'toko.js',
+    'pages/toko-online.js',
     'pages/akun.js',
     'pages/jurnal.js',
     'pages/laporan.js',

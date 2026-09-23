@@ -41,13 +41,13 @@ const tokoPage = createCatalogCart('tokoPage', {
 
 Object.assign(tokoPage, {
     tenant: null,
-    tenantId: '',
+    tenantId: '', // slug link publik (mis. 'jaya') ATAU id tenant mentah — lihat worker.js view=toko-*
 
     /** Muat profil toko + katalog produknya lewat endpoint publik. */
-    async muatToko(tenantId) {
-        const { tenant, produk } = await db.storefrontTokoDetail(tenantId);
+    async muatToko(kunciToko) {
+        const { tenant, produk } = await db.storefrontTokoDetail(kunciToko);
         this.tenant = tenant;
-        this.tenantId = tenantId;
+        this.tenantId = kunciToko;
         this.kataKunci = '';
         this.kategoriAktif = '';
         this.setProdukList(produk || []);
@@ -99,6 +99,7 @@ Object.assign(tokoPage, {
                 section: 'articleFull',
                 lines: [
                     `<button class="slcBtn" style="background:#555" onclick="web.navigate('toko')">&larr; Semua Toko</button>`,
+                    this.tenant.deskripsi ? `<div class="info-card">${escHtml(this.tenant.deskripsi)}</div>` : '',
                     catalogHtml,
                 ],
             },
@@ -127,9 +128,9 @@ async function resolveToko(sub) {
     }
 
     const kartu = daftar.map(t => `
-        <button type="button" class="catcart-product-card" onclick='web.navigate(${JSON.stringify('toko/' + t.id)})'>
+        <button type="button" class="catcart-product-card" onclick='web.navigate(${JSON.stringify('toko/' + (t.slug || t.id))})'>
             <span class="catcart-product-nama">${escHtml(t.nama)}</span>
-            <span class="catcart-product-kategori">${escHtml(t.alamat || '') || '&nbsp;'}</span>
+            <span class="catcart-product-kategori">${escHtml(t.deskripsi || t.alamat || '') || '&nbsp;'}</span>
             ${t.telepon ? `<span class="catcart-product-harga">${escHtml(t.telepon)}</span>` : ''}
         </button>`).join('');
 

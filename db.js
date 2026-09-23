@@ -211,10 +211,35 @@ const db = {
         return result;
     },
 
+    // --- [ECOMMERCE] Pengaturan etalase toko milik SENDIRI (pemilik toko,
+    // bukan superadmin) — dipakai halaman pages/toko-online.js. Backend
+    // (handleTenantsTable) mengizinkan owner membaca/mengubah HANYA
+    // tenant miliknya sendiri lewat rute /api?table=tenants&id=... ini. ---
+    async myTenant() {
+        return apiGet({ table: 'tenants', id: requireTenant() });
+    },
+    async updateMyTenant(patch) {
+        const result = await apiSend('PATCH', { table: 'tenants', id: requireTenant() }, patch);
+        invalidateTable('tenants');
+        return result;
+    },
+
     // --- Autentikasi (diproses SEPENUHNYA di server) ---
     async login(payload) { return apiPublicSend('POST', { view: 'login' }, payload); },
     async register(payload) { return apiPublicSend('POST', { view: 'register' }, payload); },
 
     // --- Captcha matematika (lihat auth.js) — soal baru tiap dipanggil. ---
     async getCaptcha() { return apiPublicGet({ view: 'captcha' }); },
+
+    // ------------------------------------------------------------
+    // [ECOMMERCE] Etalase belanja PUBLIK (pages/toko.js) — TIDAK butuh
+    // sesi/login sama sekali, lewat endpoint /public?view=toko-*.
+    // `toko` di bawah adalah slug link publik (mis. 'jaya') ATAU id
+    // tenant mentah (kompatibel ke belakang), lihat worker.js.
+    // ------------------------------------------------------------
+    async storefrontTokoList() { return apiPublicGet({ view: 'toko-list' }); },
+    async storefrontTokoDetail(toko) { return apiPublicGet({ view: 'toko-detail', toko }); },
+    async storefrontPesan({ tenantId, pembeli, items }) {
+        return apiPublicSend('POST', { view: 'toko-pesan' }, { toko: tenantId, pembeli, items });
+    },
 };

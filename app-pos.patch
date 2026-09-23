@@ -1,0 +1,292 @@
+diff --git a/dataset.js b/dataset.js
+index b3b83bb..b04b4ac 100644
+--- a/dataset.js
++++ b/dataset.js
+@@ -21,6 +21,7 @@
+ // ============================================================
+ const siteConfig = [
+     { slug: 'home',        label: 'Beranda',  menu: true },
++    { slug: 'toko',        label: 'Belanja',  menu: true }, // etalase publik — tanpa `role`/`guestOnly` supaya tampil utk semua orang, login ataupun tidak (lihat renderMenu() di index.html)
+     { slug: 'dashboard',   label: 'Dashboard', menu: true, role: ['owner', 'kasir', 'gudang'] },
+     {
+         label: 'Penjualan',
+@@ -62,6 +63,7 @@ const pages = {};
+ const pageFiles = [
+     'pages/shared.js',
+     'pages/home.js',
++    'pages/toko.js',
+     'pages/produk.js',
+     'pages/kontak.js',
+     'pages/lokasi.js',
+diff --git a/db.js b/db.js
+index 52b8528..b083524 100644
+--- a/db.js
++++ b/db.js
+@@ -217,4 +217,11 @@ const db = {
+ 
+     // --- Captcha matematika (lihat auth.js) — soal baru tiap dipanggil. ---
+     async getCaptcha() { return apiPublicGet({ view: 'captcha' }); },
++
++    // --- Etalase belanja publik (pages/toko.js) — TANPA sesi, dipakai
++    //     pembeli umum yang belum/tidak login. Lihat handlePublic() di
++    //     worker.js untuk kolom yang dikembalikan & validasi server-side. ---
++    async storefrontTokoList() { return apiPublicGet({ view: 'toko-list' }); },
++    async storefrontTokoDetail(tenantId) { return apiPublicGet({ view: 'toko-detail', tenantId }); },
++    async storefrontPesan(payload) { return apiPublicSend('POST', { view: 'pesanan' }, payload); },
+ };
+diff --git a/pages/toko.js b/pages/toko.js
+new file mode 100644
+index 0000000..ef0dc8d
+--- /dev/null
++++ b/pages/toko.js
+@@ -0,0 +1,145 @@
++// ============================================================
++// pages/toko.js — Etalase belanja PUBLIK: daftar toko + produknya,
++// supaya pembeli umum (TANPA login) bisa langsung memesan di
++// pos.piawai.id/?toko.
++//
++// Beda dengan kasir/transaksi/distribusi (pages/shared.js):
++//   - Data diambil lewat db.storefrontTokoList()/storefrontTokoDetail()
++//     -> endpoint /public di worker.js, TIDAK butuh sesi/tenant aktif.
++//   - Checkout TIDAK memakai createInstantDocumentPage (itu untuk staf
++//     yang SUDAH login & tenant-nya sendiri). Yang dipakai ulang cuma
++//     mesin katalog+keranjang (createCatalogCart dari shared.js) —
++//     pembeli tidak login, tidak pilih Lokasi/Kontak, dan checkout-nya
++//     memanggil endpoint publik (db.storefrontPesan), BUKAN db.insert.
++//   - Pesanan masuk sebagai 1 baris `transaksi` berstatus 'draft'
++//     ("Pesanan Online") — stok BELUM dipotong & jurnal BELUM diposting.
++//     Pemilik/kasir toko mengonfirmasi lewat tombol "Konfirmasi Pesanan"
++//     di halaman detail Transaksi (lihat pages/transaksi.js) — baru di
++//     situ stok terpotong & jurnal terposting lewat /api yang memang
++//     sudah tervalidasi tenant, supaya pembeli anonim tidak pernah bisa
++//     langsung mengubah stok/keuangan toko orang lain.
++// ============================================================
++web.routes.toko = 'resolveToko';
++
++const tokoPage = createCatalogCart('tokoPage', {
++    getPrice: (p) => p.hargaJual || 0,
++    getStock: (p) => (p.stok !== undefined ? p.stok : null),
++    cartTitle: 'Keranjang Belanja',
++    emptyCatalogMsg: 'Toko ini belum punya produk aktif.',
++    emptyCartMsg: 'Keranjang masih kosong. Ketuk produk untuk menambah.',
++    confirmLabel: (ctrl) => `Kirim Pesanan (${formatRupiah(ctrl.total())})`,
++    extraFieldsHtml: () => `
++        <div class="a-row"><label class="a-label">Nama Anda <span style="color:var(--aColor,#DF8C43)">*</span></label>
++            <input type="text" name="pembeliNama" required maxlength="120" placeholder="Nama lengkap"></div>
++        <div class="a-row"><label class="a-label">No. WhatsApp/Telepon <span style="color:var(--aColor,#DF8C43)">*</span></label>
++            <input type="text" name="pembeliTelepon" required maxlength="40" placeholder="08xxxxxxxxxx"></div>
++        <div class="a-row"><label class="a-label">Alamat Pengiriman / Catatan</label>
++            <textarea name="pembeliAlamat" rows="2" maxlength="240" placeholder="Opsional"></textarea></div>`,
++    onCartChange: (ctrl) => ctrl.updateFab(),
++    onConfirm: async (cart, form) => tokoPage.kirimPesanan(cart, form),
++});
++
++Object.assign(tokoPage, {
++    tenant: null,
++    tenantId: '',
++
++    /** Muat profil toko + katalog produknya lewat endpoint publik. */
++    async muatToko(tenantId) {
++        const { tenant, produk } = await db.storefrontTokoDetail(tenantId);
++        this.tenant = tenant;
++        this.tenantId = tenantId;
++        this.kataKunci = '';
++        this.kategoriAktif = '';
++        this.setProdukList(produk || []);
++    },
++
++    /** FAB keranjang di kanan-bawah (markup sama seperti pageBlocks di shared.js). */
++    updateFab() {
++        const fab = web.gebi('tokoPageFab');
++        if (!fab) return;
++        fab.querySelector('.catcart-fab-count').textContent = this.jumlahItem();
++        fab.querySelector('.catcart-fab-total').textContent = formatRupiah(this.total());
++        fab.classList.toggle('hide', this.jumlahItem() === 0);
++    },
++
++    /** Kirim pesanan ke endpoint publik (bukan db.insert — lihat catatan di atas). */
++    async kirimPesanan(cart, form) {
++        const pembeli = {
++            nama: form.querySelector('[name="pembeliNama"]')?.value.trim() || '',
++            telepon: form.querySelector('[name="pembeliTelepon"]')?.value.trim() || '',
++            alamat: form.querySelector('[name="pembeliAlamat"]')?.value.trim() || '',
++        };
++        if (!pembeli.nama || !pembeli.telepon) throw new Error('Nama & telepon wajib diisi.');
++
++        const items = cart.map(c => ({ produkId: c.produkId, qty: c.qty }));
++        const hasil = await db.storefrontPesan({ tenantId: this.tenantId, pembeli, items });
++
++        web.closeDrawer();
++        alert(`Pesanan terkirim! Toko akan menghubungi ${pembeli.nama} di ${pembeli.telepon} untuk konfirmasi & pengiriman. (Ref: ${hasil.id})`);
++    },
++
++    pageBlocks() {
++        const catalogHtml = `
++            <div class="catcart-toolbar">
++                <input type="search" placeholder="Cari produk..." oninput="tokoPage.cariProduk(this.value)" class="catcart-search">
++                <div class="catcart-chips" id="tokoPageChips">${this.chipsHtml()}</div>
++            </div>
++            <div id="tokoPageGrid">${this.gridHtml()}</div>
++            <div class="catcart-fab hide" id="tokoPageFab" onclick="tokoPage.openCart()">
++                <span>&#128722; <span class="catcart-fab-count">0</span> item</span>
++                <span class="catcart-fab-total">Rp0</span>
++            </div>`;
++        return [
++            {
++                section: 'titleHero',
++                title: escHtml(this.tenant.nama),
++                description: `${escHtml(this.tenant.alamat || '')}${this.tenant.telepon ? ' &middot; ' + escHtml(this.tenant.telepon) : ''}`,
++            },
++            {
++                section: 'articleFull',
++                lines: [
++                    `<button class="slcBtn" style="background:#555" onclick="web.navigate('toko')">&larr; Semua Toko</button>`,
++                    catalogHtml,
++                ],
++            },
++        ];
++    },
++});
++
++async function resolveToko(sub) {
++    // --- Halaman katalog satu toko (?toko/<tenantId>) ---
++    if (sub) {
++        try {
++            await tokoPage.muatToko(sub);
++        } catch (err) {
++            return [{ section: 'titleHero', title: 'Toko Tidak Ditemukan', description: escHtml(err.message) }];
++        }
++        if (!tokoPage.tenant) return [{ section: 'titleHero', title: 'Toko Tidak Ditemukan' }];
++        return tokoPage.pageBlocks();
++    }
++
++    // --- Daftar semua toko (?toko) ---
++    let daftar = [];
++    try {
++        daftar = await db.storefrontTokoList();
++    } catch (err) {
++        return [{ section: 'titleHero', title: 'Belanja', description: 'Gagal memuat daftar toko: ' + escHtml(err.message) }];
++    }
++
++    const kartu = daftar.map(t => `
++        <button type="button" class="catcart-product-card" onclick='web.navigate(${JSON.stringify('toko/' + t.id)})'>
++            <span class="catcart-product-nama">${escHtml(t.nama)}</span>
++            <span class="catcart-product-kategori">${escHtml(t.alamat || '') || '&nbsp;'}</span>
++            ${t.telepon ? `<span class="catcart-product-harga">${escHtml(t.telepon)}</span>` : ''}
++        </button>`).join('');
++
++    return [
++        { section: 'titleHero', title: 'Belanja', description: 'Pilih toko untuk melihat produk & langsung memesan — tanpa perlu akun.' },
++        {
++            section: 'articleFull',
++            lines: daftar.length
++                ? [`<div class="catcart-grid">${kartu}</div>`]
++                : ['Belum ada toko yang membuka etalase online saat ini.'],
++        },
++    ];
++}
+diff --git a/pages/transaksi.js b/pages/transaksi.js
+index de17e89..9bf6811 100644
+--- a/pages/transaksi.js
++++ b/pages/transaksi.js
+@@ -59,8 +59,55 @@ const transaksiPage = {
+         try { await db.remove('transaksi', id); } catch (err) { return alert('Gagal menghapus: ' + err.message); }
+         web.navigate('transaksi');
+     },
++
++    /** Pesanan dari etalase online (pages/toko.js) masuk sebagai `transaksi`
++     *  berstatus 'draft' TANPA stok terpotong (lihat handlePublic() di
++     *  worker.js) — baru di sini, setelah staf toko menekan tombol ini,
++     *  stok dipotong & jurnal diposting lewat /api yang sudah tervalidasi
++     *  tenant (bukan endpoint publik), sama seperti alur simpan() instan
++     *  di shared.js. */
++    async konfirmasiPesanan(id) {
++        if (!confirm('Konfirmasi pesanan ini? Stok akan dipotong sesuai baris pesanan.')) return;
++        try {
++            const trx = await db.find('transaksi', t => t.id === id);
++            if (!trx || trx.status !== 'draft') return alert('Pesanan ini sudah diproses atau tidak valid.');
++            const [baris, produkList] = await Promise.all([
++                db.query('transaksi_produk', b => b.transaksiId === id),
++                db.query('produk', () => true),
++            ]);
++            for (const b of baris) {
++                const existing = await db.find('lokasi_produk', s => s.lokasiId === trx.lokasiId && s.produkId === b.produkId);
++                const stokLama = existing?.stok || 0;
++                const stokBaru = stokLama - b.qty;
++                if (existing) await db.update('lokasi_produk', existing.id, { stok: stokBaru });
++                else await db.insert('lokasi_produk', { lokasiId: trx.lokasiId, produkId: b.produkId, stok: stokBaru, stokMinimum: 0 });
++            }
++            await db.update('transaksi', id, { status: 'selesai' });
++            const cart = baris.map(b => ({ produkId: b.produkId, qty: b.qty, harga: b.hargaSatuan }));
++            await jurnalPage.postingTransaksi(trx, cart, { produkList });
++        } catch (err) { return alert('Gagal mengonfirmasi: ' + err.message); }
++        web.navigate(`transaksi/detail-${id}`);
++    },
++
++    async tolakPesanan(id) {
++        if (!confirm('Tolak pesanan ini? Pesanan akan ditandai batal (stok tidak berubah).')) return;
++        try { await db.update('transaksi', id, { status: 'batal' }); } catch (err) { return alert('Gagal menolak: ' + err.message); }
++        web.navigate(`transaksi/detail-${id}`);
++    },
+ };
+ 
++/** `catatan` diisi JSON {sumber:'toko-online', pembeli:{...}} HANYA untuk
++ *  pesanan yang masuk dari etalase publik (lihat handlePublic() di
++ *  worker.js) — transaksi biasa dari kasir/transaksi internal punya
++ *  `catatan` kosong/teks bebas, jadi JSON.parse cukup dibungkus try/catch. */
++function bacaPesananOnline(trx) {
++    if (!trx?.catatan) return null;
++    try {
++        const meta = JSON.parse(trx.catatan);
++        return meta?.sumber === 'toko-online' ? meta.pembeli || {} : null;
++    } catch (e) { return null; }
++}
++
+ // --- Pembayaran QRIS ---------------------------------------------------
+ const qrisPage = {
+     /** Buat 1 baris pembayaran QRIS. `qrString` di sini adalah DEMO (bukan
+@@ -133,6 +180,7 @@ async function resolveTransaksi(sub) {
+             Tanggal: t.tanggal,
+             Lokasi: lokasiById[t.lokasiId]?.nama || '-',
+             Kontak: kontakById[t.kontakId]?.nama || '-',
++            Sumber: bacaPesananOnline(t) ? `<span class="badge badge-warning">Pesanan Online</span>` : `<span class="badge">POS</span>`,
+             Total: formatRupiah(t.totalBayar),
+             Status: `<span class="badge ${escHtml(statusBadge[t.status] || '')}">${escHtml(t.status)}</span>`,
+             Aksi: `<button class="slcBtn" onclick='web.navigate(${JSON.stringify('transaksi/detail-' + t.id)})'>Lihat</button>`,
+@@ -148,7 +196,7 @@ async function resolveTransaksi(sub) {
+                  <button class="slcBtn" style="background:#555" onclick="web.navigate('transaksi/beli')">+ Transaksi Beli</button>`,
+                 `table:${JSON.stringify(tableRows)}`,
+             ],
+-            tableOpts: { rawKeys: ['Tipe', 'Status', 'Aksi'] },
++            tableOpts: { rawKeys: ['Tipe', 'Sumber', 'Status', 'Aksi'] },
+             emptyText: 'Belum ada transaksi.',
+         },
+     ];
+@@ -174,6 +222,19 @@ async function resolveTransaksiDetail(id) {
+         Subtotal: formatRupiah(b.qty * b.hargaSatuan),
+     }));
+ 
++    const pembeli = bacaPesananOnline(trx);
++    const pesananOnlineBlock = pembeli ? [
++        '## Pesanan Online',
++        `card:Nama Pembeli:${pembeli.nama || '-'}`,
++        `card:Telepon:${pembeli.telepon || '-'}`,
++        pembeli.alamat ? `card:Alamat/Catatan:${pembeli.alamat}` : '',
++        trx.status === 'draft'
++            ? `<div class="info-card"><strong>Pesanan baru dari etalase online — stok BELUM dipotong.</strong><br><br>
++                <button class="slcBtn" onclick='transaksiPage.konfirmasiPesanan(${JSON.stringify(id)})'>Konfirmasi &amp; Potong Stok</button>
++                <button class="slcBtn" style="background:#c0392b" onclick='transaksiPage.tolakPesanan(${JSON.stringify(id)})'>Tolak Pesanan</button></div>`
++            : '',
++    ].filter(Boolean) : [];
++
+     const pay = payments[0];
+     const paymentBlock = pay ? [
+         '## Pembayaran QRIS',
+@@ -196,6 +257,7 @@ async function resolveTransaksiDetail(id) {
+                 `<button class="slcBtn" style="background:#555" onclick="web.navigate('transaksi')">&larr; Kembali</button>
+                  <button class="slcBtn" style="background:#c0392b" onclick='transaksiPage.hapus(${JSON.stringify(id)})'>Hapus</button>`,
+                 `table:${JSON.stringify(tableRows)}`,
++                ...pesananOnlineBlock,
+                 ...paymentBlock,
+             ],
+             emptyText: 'Belum ada baris produk pada transaksi ini.',

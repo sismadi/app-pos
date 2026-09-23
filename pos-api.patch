@@ -1,0 +1,150 @@
+diff --git a/worker.js b/worker.js
+index 7518046..54ac903 100644
+--- a/worker.js
++++ b/worker.js
+@@ -170,6 +170,135 @@ async function handleApi(request, env) {
+   return json({ error: 'Method not allowed' }, 405);
+ }
+ 
++// ============================================================
++// /public — endpoint TANPA autentikasi & TANPA scoping tenantId,
++// khusus etalase belanja publik (lihat pages/toko.js di app-pos) supaya
++// pembeli umum bisa lihat produk & memesan tanpa akun/login.
++//
++//   GET  /public?view=toko-list                 -> daftar toko aktif (nama, alamat, telepon)
++//   GET  /public?view=toko-detail&tenantId=...  -> profil toko + produk aktif (id, nama, kategori, satuan, hargaJual, stok gabungan semua lokasi)
++//   POST /public?view=pesanan                   -> body {tenantId, pembeli:{nama,telepon,alamat}, items:[{produkId,qty}]}
++//                                                    -> buat 1 baris `transaksi` (tipe=jual, status='draft') + `transaksi_produk`
++//
++// [SECURITY] Ini satu-satunya tempat di worker ini yang membaca/menulis
++// tabel scoped TANPA memverifikasi sesi milik tenant tsb — sengaja,
++// karena pembeli publik memang bukan user tenant manapun. Untuk menahan
++// risikonya:
++//   - GET hanya mengembalikan kolom aman (harga BELI/margin tidak pernah
++//     ikut terkirim, hanya hargaJual).
++//   - POST TIDAK PERNAH memakai harga/nama produk dari body request —
++//     produkId & tenantId diverifikasi ulang ke tabel `produk` di server,
++//     hargaSatuan diambil dari situ (bukan dari klien), supaya pembeli
++//     tidak bisa mengubah harga lewat devtools.
++//   - POST TIDAK memotong stok & TIDAK memposting jurnal — transaksi
++//     dibuat berstatus 'draft' ("Pesanan Online"). Stok baru terpotong
++//     & jurnal terposting setelah staf toko menekan "Konfirmasi Pesanan"
++//     di halaman Transaksi (pages/transaksi.js, lewat /api yang SUDAH
++//     tervalidasi tenant seperti biasa) — jadi pembeli anonim tidak
++//     pernah bisa langsung mengubah stok/keuangan toko orang lain.
++//   - Kalau Worker produksi Anda SUDAH memakai lapisan auth Bearer/rate-
++//     limit (lihat README app-pos), pastikan lapisan itu TETAP melewatkan
++//     path '/public' tanpa syarat token — sama seperti view login/register/
++//     captcha yang sudah ada — sebelum menempelkan blok ini ke worker
++//     produksi Anda yang sebenarnya (isi worker.js di repo pos-api ini
++//     BELUM mencerminkan hardening Bearer-token yang disebut README
++//     app-pos, lihat catatan di pesan pendamping).
++// ============================================================
++async function handlePublic(request, env) {
++  const db = env.DB;
++  const url = new URL(request.url);
++  const view = url.searchParams.get('view');
++
++  if (request.method === 'GET' && view === 'toko-list') {
++    const { results } = await db
++      .prepare(`SELECT id, nama, alamat, telepon FROM tenants WHERE status = 'aktif' AND kodeToko != 'SUPERADMIN' ORDER BY nama`)
++      .all();
++    return json(results);
++  }
++
++  if (request.method === 'GET' && view === 'toko-detail') {
++    const tenantId = url.searchParams.get('tenantId');
++    if (!tenantId) return json({ error: 'tenantId wajib diisi' }, 400);
++    const tenant = await db
++      .prepare(`SELECT id, nama, alamat, telepon FROM tenants WHERE id = ? AND status = 'aktif' AND kodeToko != 'SUPERADMIN'`)
++      .bind(tenantId).first();
++    if (!tenant) return json({ error: 'Toko tidak ditemukan' }, 404);
++
++    const { results: produk } = await db.prepare(`
++      SELECT p.id, p.kode, p.nama, p.kategori, p.satuan, p.hargaJual,
++             COALESCE(SUM(lp.stok), 0) AS stok
++      FROM produk p
++      LEFT JOIN lokasi_produk lp ON lp.produkId = p.id AND lp.tenantId = p.tenantId
++      WHERE p.tenantId = ? AND p.aktif = 1
++      GROUP BY p.id
++      ORDER BY p.nama
++    `).bind(tenantId).all();
++    return json({ tenant, produk });
++  }
++
++  if (request.method === 'POST' && view === 'pesanan') {
++    const body = await request.json().catch(() => null);
++    const tenantId = body?.tenantId;
++    const items = Array.isArray(body?.items) ? body.items : [];
++    const pembeli = body?.pembeli || {};
++    if (!tenantId) return json({ error: 'tenantId wajib diisi' }, 400);
++    if (!pembeli.nama || !pembeli.telepon) return json({ error: 'Nama & telepon pembeli wajib diisi' }, 400);
++    if (!items.length || items.length > 50) return json({ error: 'Keranjang kosong atau berisi terlalu banyak baris' }, 400);
++
++    const tenant = await db
++      .prepare(`SELECT id FROM tenants WHERE id = ? AND status = 'aktif' AND kodeToko != 'SUPERADMIN'`)
++      .bind(tenantId).first();
++    if (!tenant) return json({ error: 'Toko tidak ditemukan' }, 404);
++
++    // Utamakan lokasi bertipe 'toko' (etalase depan); kalau tidak ada, pakai lokasi pertama.
++    const lokasi = await db
++      .prepare(`SELECT id FROM lokasi WHERE tenantId = ? ORDER BY (tipe = 'toko') DESC, createdAt ASC LIMIT 1`)
++      .bind(tenantId).first();
++    if (!lokasi) return json({ error: 'Toko ini belum punya lokasi, belum bisa menerima pesanan' }, 400);
++
++    // [SECURITY] harga & keberadaan produk diambil ulang dari DB, BUKAN dari body.
++    const lines = [];
++    for (const it of items) {
++      const qty = Number(it?.qty);
++      if (!it?.produkId || !(qty > 0)) continue;
++      const produk = await db
++        .prepare(`SELECT id, hargaJual FROM produk WHERE id = ? AND tenantId = ? AND aktif = 1`)
++        .bind(it.produkId, tenantId).first();
++      if (!produk) continue;
++      lines.push({ produkId: produk.id, qty, hargaSatuan: produk.hargaJual || 0 });
++    }
++    if (!lines.length) return json({ error: 'Tidak ada produk valid di keranjang' }, 400);
++
++    const totalBayar = lines.reduce((s, l) => s + l.qty * l.hargaSatuan, 0);
++    const now = new Date().toISOString();
++    const headerId = genId('transaksi');
++    const catatan = JSON.stringify({
++      sumber: 'toko-online',
++      pembeli: {
++        nama: String(pembeli.nama).slice(0, 120),
++        telepon: String(pembeli.telepon).slice(0, 40),
++        alamat: String(pembeli.alamat || '').slice(0, 240),
++      },
++    });
++
++    await db.prepare(`
++      INSERT INTO transaksi (id, tenantId, nomor, tipe, tanggal, lokasiId, kontakId, status, metodePembayaran, totalBayar, catatan, createdAt)
++      VALUES (?, ?, ?, 'jual', ?, ?, NULL, 'draft', 'tunai', ?, ?, ?)
++    `).bind(headerId, tenantId, 'WEB-' + Date.now().toString(36).toUpperCase(), now.slice(0, 10), lokasi.id, totalBayar, catatan, now).run();
++
++    for (const l of lines) {
++      await db.prepare(`
++        INSERT INTO transaksi_produk (id, tenantId, transaksiId, produkId, qty, hargaSatuan, subtotal)
++        VALUES (?, ?, ?, ?, ?, ?, ?)
++      `).bind(genId('transaksi_produk'), tenantId, headerId, l.produkId, l.qty, l.hargaSatuan, l.qty * l.hargaSatuan).run();
++    }
++
++    return json({ id: headerId, totalBayar }, 201);
++  }
++
++  return json({ error: 'View publik tidak dikenal' }, 404);
++}
++
+ export default {
+   async fetch(request, env) {
+     if (request.method === 'OPTIONS') {
+@@ -182,6 +311,9 @@ export default {
+       });
+     }
+     try {
++      const url = new URL(request.url);
++      const parts = url.pathname.split('/').filter(Boolean);
++      if (parts[0] === 'public') return await handlePublic(request, env);
+       return await handleApi(request, env);
+     } catch (err) {
+       return json({ error: err.message }, 500);

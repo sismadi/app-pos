@@ -23,7 +23,7 @@
 
 // GANTI dengan URL hasil `wrangler deploy` di repo pos-api, tanpa slash
 // di akhir. Contoh: 'https://pos-api.namaakun.workers.dev'
-const API_BASE = 'https://pos-api.sismadi.workers.dev';
+const API_BASE = 'https://pos.piawai.workers.dev';
 
 const SCOPED_TABLES = new Set([
     'produk', 'lokasi', 'lokasi_produk', 'kontak',
